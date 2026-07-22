@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  a{color:#0066CC;text-decoration:none}
+  a:hover{color:#0071E3;text-decoration:underline}
+  input,textarea,select,button{font-family:inherit}
+  input:focus,textarea:focus{outline:none;border-color:#0071E3 !important;box-shadow:0 0 0 4px rgba(0,113,227,.16)}
+  .gx-app{display:grid;grid-template-columns:1fr;min-height:100vh;background:#F5F5F7}
+  .gx-sidebar{display:none;flex-direction:column;gap:3px;padding:22px 14px;background:#FFFFFF;border-right:1px solid #E3E3E8}
+  .gx-main{min-width:0;padding-bottom:104px}
+  .gx-content{max-width:1060px;margin:0 auto;padding:18px 16px}
+  .gx-bottomnav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:20;height:74px;background:rgba(255,255,255,.82);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-top:1px solid #E3E3E8;align-items:center;justify-content:space-around;padding:0 6px}
+  .gx-grid2{display:grid;grid-template-columns:1fr;gap:14px}
+  .gx-dashcols{display:grid;grid-template-columns:1fr;gap:16px}
+  .gx-formwrap{max-width:560px;margin:0 auto}
+  .gx-narrow{max-width:820px;margin:0 auto}
+  .gx-mob{display:flex}
+  .gx-desk{display:none}
+  @media(min-width:640px){.gx-grid2{grid-template-columns:1fr 1fr}}
+  @media(min-width:900px){
+    .gx-app{grid-template-columns:252px 1fr}
+    .gx-sidebar{display:flex;position:sticky;top:0;height:100vh}
+    .gx-bottomnav{display:none}
+    .gx-main{padding-bottom:36px}
+    .gx-content{padding:28px 40px}
+    .gx-mob{display:none}
+    .gx-desk{display:flex}
+  }
+  @media(min-width:1000px){.gx-dashcols{grid-template-columns:1.05fr 1fr}}
+</style>
+</helmet>
+<div style="font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','SF Pro Display','Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1D1D1F;background:#F5F5F7;min-height:100vh">
+
+  <!-- LOGIN (full screen) -->
+  <sc-if value="{{ isLogin }}" hint-placeholder-val="{{ false }}">
+    <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:linear-gradient(180deg,#FBFBFD,#F5F5F7)">
+      <div style="width:100%;max-width:400px;background:#FFFFFF;border:1px solid #E3E3E8;border-radius:20px;box-shadow:0 24px 60px -30px rgba(0,0,0,.18);padding:36px 30px;display:flex;flex-direction:column;gap:20px">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:14px">
+          <div style="width:60px;height:60px;border-radius:16px;background:#0071E3;color:#fff;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:600">g</div>
+          <div style="text-align:center"><div style="font-size:26px;font-weight:600;letter-spacing:-.02em">Gastorin</div><div style="font-size:15px;color:#6E6E73;margin-top:4px">Tus gastos, claros y en orden</div></div>
+        </div>
+        <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:500;color:#6E6E73">Correo
+          <input type="email" value="gian@correo.com" style="height:50px;border:1px solid #D2D2D7;border-radius:12px;padding:0 14px;font-size:17px;background:#fff;color:#1D1D1F">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:500;color:#6E6E73">Contraseña
+          <input type="password" value="password" style="height:50px;border:1px solid #D2D2D7;border-radius:12px;padding:0 14px;font-size:17px;background:#fff;color:#1D1D1F">
+        </label>
+        <div style="text-align:right;margin-top:-6px"><a href="#" style="font-size:14px;font-weight:400">¿Olvidaste tu contraseña?</a></div>
+        <button onClick="{{ toDash }}" style="height:52px;border:none;border-radius:980px;background:#0071E3;color:#fff;font-size:17px;font-weight:400;cursor:pointer">Ingresar</button>
+        <div style="text-align:center;font-size:15px;color:#6E6E73">¿No tienes cuenta? <a href="#" style="font-weight:500">Crear cuenta</a></div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- APP SHELL -->
+  <sc-if value="{{ showApp }}" hint-placeholder-val="{{ true }}">
+    <div class="gx-app">
+
+      <aside class="gx-sidebar">
+        <div style="display:flex;align-items:center;gap:11px;padding:6px 10px 18px">
+          <div style="width:38px;height:38px;border-radius:11px;background:#0071E3;color:#fff;display:flex;align-items:center;justify-content:center;font-size:21px;font-weight:600">g</div>
+          <span style="font-size:19px;font-weight:600;letter-spacing:-.02em">Gastorin</span>
+        </div>
+        <button onClick="{{ toDash }}" style="min-height:46px;display:flex;align-items:center;gap:12px;padding:0 12px;border:none;border-radius:12px;background:{{ sbDash.bg }};color:{{ sbDash.tx }};font-size:14px;font-weight:{{ sbDash.fw }};cursor:pointer;text-align:left">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>Panel</button>
+        <button onClick="{{ toReg }}" style="min-height:46px;display:flex;align-items:center;gap:12px;padding:0 12px;border:none;border-radius:12px;background:{{ sbReg.bg }};color:{{ sbReg.tx }};font-size:14px;font-weight:{{ sbReg.fw }};cursor:pointer;text-align:left">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>Registrar gasto</button>
+        <button onClick="{{ toHist }}" style="min-height:46px;display:flex;align-items:center;gap:12px;padding:0 12px;border:none;border-radius:12px;background:{{ sbHist.bg }};color:{{ sbHist.tx }};font-size:14px;font-weight:{{ sbHist.fw }};cursor:pointer;text-align:left">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>Historial</button>
+        <button onClick="{{ toTray }}" style="min-height:46px;display:flex;align-items:center;gap:12px;padding:0 12px;border:none;border-radius:12px;background:{{ sbTray.bg }};color:{{ sbTray.tx }};font-size:14px;font-weight:{{ sbTray.fw }};cursor:pointer;text-align:left">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>Bandeja
+          <span style="margin-left:auto;min-width:20px;height:20px;border-radius:10px;background:#FF3B30;color:#fff;font-size:11px;font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 5px">3</span></button>
+        <button onClick="{{ toCat }}" style="min-height:46px;display:flex;align-items:center;gap:12px;padding:0 12px;border:none;border-radius:12px;background:{{ sbCat.bg }};color:{{ sbCat.tx }};font-size:14px;font-weight:{{ sbCat.fw }};cursor:pointer;text-align:left">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="3.5"/><circle cx="17" cy="7" r="3.5"/><circle cx="7" cy="17" r="3.5"/><circle cx="17" cy="17" r="3.5"/></svg>Categorías</button>
+        <button onClick="{{ toBudget }}" style="min-height:46px;display:flex;align-items:center;gap:12px;padding:0 12px;border:none;border-radius:12px;background:{{ sbBudget.bg }};color:{{ sbBudget.tx }};font-size:14px;font-weight:{{ sbBudget.fw }};cursor:pointer;text-align:left">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg>Presupuestos</button>
+        <div style="margin-top:auto;padding-top:14px;border-top:1px solid #F0F0F2;display:flex;align-items:center;gap:11px">
+          <div style="width:38px;height:38px;border-radius:50%;background:#E8F0FE;color:#0071E3;display:flex;align-items:center;justify-content:center;font-weight:600">G</div>
+          <div style="min-width:0;flex:1"><div style="font-size:13px;font-weight:600">Gian</div><div style="font-size:12px;color:#6E6E73;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">gian@correo.com</div></div>
+          <button onClick="{{ toLogin }}" title="Salir" style="width:36px;height:36px;border:1px solid #E3E3E8;border-radius:10px;background:#fff;color:#6E6E73;cursor:pointer;font-size:15px">⎋</button>
+        </div>
+      </aside>
+
+      <main class="gx-main">
+        <div class="gx-content">
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px">
+            <div style="display:flex;align-items:center;gap:11px">
+              <div class="gx-mob" style="width:34px;height:34px;border-radius:10px;background:#0071E3;color:#fff;align-items:center;justify-content:center;font-size:19px;font-weight:600">g</div>
+              <div><div style="font-size:clamp(20px,4vw,28px);font-weight:600;letter-spacing:-.02em">{{ pageTitle }}</div><div style="font-size:13px;color:#6E6E73">{{ pageSub }}</div></div>
+            </div>
+            <div style="width:42px;height:42px;border-radius:50%;background:#E8F0FE;color:#0071E3;display:flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0">G</div>
+          </div>
+
+          <!-- DASHBOARD (sección premium oscura) -->
+          <sc-if value="{{ isDash }}" hint-placeholder-val="{{ true }}">
+            <div style="background:#000000;border-radius:22px;padding:20px;display:flex;flex-direction:column;gap:16px">
+              <div class="gx-grid2">
+                <div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:18px;padding:20px">
+                  <span style="display:inline-block;font-size:12px;font-weight:600;color:#A9B6FF;background:rgba(99,102,241,.16);border-radius:8px;padding:3px 9px">S/ Soles</span>
+                  <div style="font-size:13px;color:#98989D;margin-top:12px">Gastado este mes</div>
+                  <div style="font-size:32px;font-weight:600;letter-spacing:-.02em;color:#F5F5F7">S/ 2,450.80</div>
+                  <div style="font-size:12px;color:#FFB84D;font-weight:500;margin-top:6px">▲ +8% vs. junio</div>
+                </div>
+                <div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:18px;padding:20px">
+                  <span style="display:inline-block;font-size:12px;font-weight:600;color:#6EE7B0;background:rgba(52,199,89,.16);border-radius:8px;padding:3px 9px">$ Dólares</span>
+                  <div style="font-size:13px;color:#98989D;margin-top:12px">Gastado este mes</div>
+                  <div style="font-size:32px;font-weight:600;letter-spacing:-.02em;color:#F5F5F7">$ 320.50</div>
+                  <div style="font-size:12px;color:#6EE7B0;font-weight:500;margin-top:6px">▼ −3% vs. junio</div>
+                </div>
+              </div>
+              <div class="gx-dashcols">
+                <div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:18px;padding:20px">
+                  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px"><div style="font-size:15px;font-weight:600;color:#F5F5F7">Gasto por categoría</div><div style="font-size:12px;color:#98989D;font-weight:500">en Soles</div></div>
+                  <div style="display:flex;flex-direction:column;gap:14px">
+                    <sc-for list="{{ catChart }}" as="c" hint-placeholder-count="5">
+                      <div>
+                        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px"><span style="display:flex;align-items:center;gap:8px;font-weight:500;color:#E5E5EA"><span style="width:10px;height:10px;border-radius:3px;background:{{ c.color }};display:inline-block"></span>{{ c.name }}</span><span style="font-weight:600;color:#F5F5F7">S/ {{ c.amt }}</span></div>
+                        <div style="height:8px;border-radius:6px;background:rgba(255,255,255,.10);overflow:hidden"><div style="height:100%;width:{{ c.pct }};background:{{ c.color }};border-radius:6px"></div></div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+                <div style="background:#1C1C1E;border:1px solid #2C2C2E;border-radius:18px;padding:20px">
+                  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:18px"><div style="font-size:15px;font-weight:600;color:#F5F5F7">Tendencia mensual</div><div style="font-size:12px;color:#98989D;font-weight:500">Soles</div></div>
+                  <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:8px;height:150px">
+                    <sc-for list="{{ trend }}" as="t" hint-placeholder-count="6">
+                      <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:8px;height:100%;justify-content:flex-end"><div style="width:100%;max-width:34px;border-radius:7px 7px 3px 3px;background:{{ t.bg }};height:{{ t.h }}"></div><div style="font-size:11px;color:#98989D;font-weight:500">{{ t.m }}</div></div>
+                    </sc-for>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- REGISTRAR -->
+          <sc-if value="{{ isReg }}" hint-placeholder-val="{{ false }}">
+            <div class="gx-formwrap" style="display:flex;flex-direction:column;gap:16px">
+              <div style="background:#FFFFFF;border:1px solid #E3E3E8;border-radius:18px;padding:24px 16px;text-align:center">
+                <div style="font-size:12px;color:#6E6E73;font-weight:500;margin-bottom:8px">Monto</div>
+                <div style="display:flex;align-items:baseline;justify-content:center;gap:6px"><span style="font-size:26px;font-weight:600;color:#0071E3">{{ regSym }}</span><span style="font-size:48px;font-weight:600;letter-spacing:-.03em">124.90</span></div>
+                <div style="display:inline-flex;background:#EFEFF0;border-radius:12px;padding:4px;margin-top:16px">
+                  <button onClick="{{ setPen }}" style="min-height:42px;padding:0 24px;border:none;border-radius:9px;font-size:14px;font-weight:600;cursor:pointer;background:{{ penBg }};color:{{ penTx }};box-shadow:{{ penSh }}">S/ PEN</button>
+                  <button onClick="{{ setUsd }}" style="min-height:42px;padding:0 24px;border:none;border-radius:9px;font-size:14px;font-weight:600;cursor:pointer;background:{{ usdBg }};color:{{ usdTx }};box-shadow:{{ usdSh }}">$ USD</button>
+                </div>
+              </div>
+              <div style="background:#FFFFFF;border:1px solid #E3E3E8;border-radius:18px;padding:20px;display:flex;flex-direction:column;gap:16px">
+                <div>
+                  <div style="font-size:13px;font-weight:500;color:#6E6E73;margin-bottom:8px">Categoría</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:8px">
+                    <sc-for list="{{ cats }}" as="c" hint-placeholder-count="6"><span style="display:inline-flex;align-items:center;gap:7px;min-height:42px;padding:0 14px;border-radius:11px;border:1.5px solid {{ c.selBd }};background:{{ c.selBg }};font-size:13px;font-weight:500"><span style="width:9px;height:9px;border-radius:3px;background:{{ c.color }}"></span>{{ c.name }}</span></sc-for>
+                  </div>
+                </div>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:500;color:#6E6E73">Fecha<input type="text" value="18 de julio, 2026" style="height:48px;border:1px solid #D2D2D7;border-radius:12px;padding:0 14px;font-size:17px;background:#fff;color:#1D1D1F"></label>
+                <label style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:500;color:#6E6E73">Descripción<textarea rows="2" style="border:1px solid #D2D2D7;border-radius:12px;padding:11px 14px;font-size:17px;background:#fff;color:#1D1D1F;resize:none">Almuerzo con equipo</textarea></label>
+              </div>
+              <button style="height:52px;border:none;border-radius:980px;background:#0071E3;color:#fff;font-size:17px;font-weight:400;cursor:pointer">Guardar gasto</button>
+            </div>
+          </sc-if>
+
+          <!-- HISTORIAL -->
+          <sc-if value="{{ isHist }}" hint-placeholder-val="{{ false }}">
+            <div class="gx-narrow" style="display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;gap:8px;flex-wrap:wrap">
+                <sc-for list="{{ curFilters }}" as="f" hint-placeholder-count="3"><button onClick="{{ f.sel }}" style="min-height:42px;padding:0 16px;border-radius:980px;border:1px solid {{ f.bd }};background:{{ f.bg }};color:{{ f.tx }};font-size:13px;font-weight:500;cursor:pointer">{{ f.label }}</button></sc-for>
+                <button style="min-height:42px;padding:0 15px;border-radius:980px;border:1px solid #D2D2D7;background:#fff;color:#1D1D1F;font-size:13px;font-weight:500;cursor:pointer">Categoría ▾</button>
+                <button style="min-height:42px;padding:0 15px;border-radius:980px;border:1px solid #D2D2D7;background:#fff;color:#1D1D1F;font-size:13px;font-weight:500;cursor:pointer">Julio ▾</button>
+              </div>
+              <sc-if value="{{ histHasItems }}" hint-placeholder-val="{{ true }}">
+                <div style="background:#FFFFFF;border:1px solid #E3E3E8;border-radius:18px;overflow:hidden">
+                  <sc-for list="{{ histList }}" as="e" hint-placeholder-count="6">
+                    <button style="width:100%;min-height:66px;display:flex;align-items:center;gap:12px;padding:12px 16px;background:#fff;border:none;border-top:1px solid #F0F0F2;cursor:pointer;text-align:left">
+                      <span style="width:40px;height:40px;border-radius:11px;background:{{ e.tint }};color:{{ e.color }};display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px;flex-shrink:0">{{ e.letter }}</span>
+                      <span style="flex:1;min-width:0"><span style="display:block;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ e.desc }}</span><span style="display:block;font-size:12px;color:#6E6E73;margin-top:2px">{{ e.cat }} · {{ e.date }}</span></span>
+                      <span style="text-align:right;flex-shrink:0"><span style="display:block;font-size:15px;font-weight:600">{{ e.sym }} {{ e.amt }}</span><span style="display:block;font-size:11px;color:#0071E3;font-weight:600;margin-top:2px">Editar ›</span></span>
+                    </button>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <sc-if value="{{ histEmpty }}" hint-placeholder-val="{{ false }}">
+                <div style="background:#FFFFFF;border:1px solid #E3E3E8;border-radius:18px;padding:48px 24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:12px">
+                  <div style="width:56px;height:56px;border-radius:16px;background:#F0F0F2;display:flex;align-items:center;justify-content:center;font-size:26px">🗒️</div>
+                  <div style="font-size:15px;font-weight:600">Sin gastos con este filtro</div>
+                  <div style="font-size:13px;color:#6E6E73;max-width:240px">Prueba con otra moneda o registra tu primer gasto del mes.</div>
+                </div>
+              </sc-if>
+            </div>
+          </sc-if>
+
+          <!-- BANDEJA -->
+          <sc-if value="{{ isTray }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;align-items:center;gap:8px;background:#FFF7ED;border:1px solid #FED7AA;color:#9A3412;border-radius:12px;padding:11px 14px;font-size:13px;font-weight:500"><span style="font-size:15px">✉</span> 3 gastos por confirmar</div>
+              <div class="gx-grid2">
+                <sc-for list="{{ drafts }}" as="d" hint-placeholder-count="3">
+                  <div style="background:#FFFFFF;border:1px solid #E3E3E8;border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:12px">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+                      <div style="min-width:0"><div style="font-size:11px;font-weight:600;color:#6E6E73;text-transform:uppercase;letter-spacing:.04em">{{ d.bank }}</div><div style="font-size:15px;font-weight:600;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ d.merchant }}</div><div style="font-size:12px;color:#86868B;margin-top:4px;font-style:italic">“{{ d.raw }}”</div></div>
+                      <div style="text-align:right;flex-shrink:0"><div style="font-size:19px;font-weight:600">{{ d.sym }} {{ d.amt }}</div><span style="display:inline-block;font-size:11px;font-weight:600;color:{{ d.chipTx }};background:{{ d.chipBg }};border-radius:7px;padding:2px 7px;margin-top:4px">{{ d.curLabel }}</span></div>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#6E6E73"><span>📅 {{ d.date }}</span><span style="display:inline-flex;align-items:center;gap:6px;font-weight:500">Sugerido: <span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:3px;background:{{ d.catColor }}"></span>{{ d.cat }}</span></span></div>
+                    <div style="display:flex;gap:10px"><button style="flex:1;min-height:46px;border:none;border-radius:980px;background:#0071E3;color:#fff;font-size:14px;font-weight:500;cursor:pointer">✓ Confirmar</button><button style="flex:1;min-height:46px;border:1px solid #D2D2D7;border-radius:980px;background:#fff;color:#6E6E73;font-size:14px;font-weight:500;cursor:pointer">✕ Descartar</button></div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- CATEGORIAS -->
+          <sc-if value="{{ isCat }}" hint-placeholder-val="{{ false }}">
+            <div class="gx-narrow" style="display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;justify-content:flex-end"><button style="min-height:42px;padding:0 18px;border:none;border-radius:980px;background:#0071E3;color:#fff;font-size:14px;font-weight:400;cursor:pointer">+ Nueva categoría</button></div>
+              <div style="font-size:12px;font-weight:600;color:#86868B;text-transform:uppercase;letter-spacing:.05em">Predefinidas</div>
+              <div style="background:#FFFFFF;border:1px solid #E3E3E8;border-radius:18px;overflow:hidden">
+                <sc-for list="{{ catsDefault }}" as="c" hint-placeholder-count="5"><button style="width:100%;min-height:62px;display:flex;align-items:center;gap:12px;padding:11px 16px;background:#fff;border:none;border-top:1px solid #F0F0F2;cursor:pointer;text-align:left"><span style="width:40px;height:40px;border-radius:11px;background:{{ c.color }};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px">{{ c.letter }}</span><span style="flex:1"><span style="display:block;font-size:15px;font-weight:600">{{ c.name }}</span><span style="display:block;font-size:12px;color:#6E6E73">{{ c.count }} gastos este mes</span></span><span style="color:#C7C7CC;font-size:20px">›</span></button></sc-for>
+              </div>
+              <div style="font-size:12px;font-weight:600;color:#86868B;text-transform:uppercase;letter-spacing:.05em;margin-top:6px">Personalizadas</div>
+              <div style="background:#FFFFFF;border:1px solid #E3E3E8;border-radius:18px;overflow:hidden">
+                <sc-for list="{{ catsCustom }}" as="c" hint-placeholder-count="2"><button style="width:100%;min-height:62px;display:flex;align-items:center;gap:12px;padding:11px 16px;background:#fff;border:none;border-top:1px solid #F0F0F2;cursor:pointer;text-align:left"><span style="width:40px;height:40px;border-radius:11px;background:{{ c.color }};color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px">{{ c.letter }}</span><span style="flex:1"><span style="display:block;font-size:15px;font-weight:600">{{ c.name }}</span><span style="display:block;font-size:12px;color:#6E6E73">{{ c.count }} gastos este mes</span></span><span style="color:#C7C7CC;font-size:20px">›</span></button></sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- PRESUPUESTOS -->
+          <sc-if value="{{ isBudget }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:14px">
+              <div style="display:flex;justify-content:flex-end"><button style="min-height:42px;padding:0 18px;border:none;border-radius:980px;background:#0071E3;color:#fff;font-size:14px;font-weight:400;cursor:pointer">+ Nuevo presupuesto</button></div>
+              <div class="gx-grid2">
+                <sc-for list="{{ budgets }}" as="b" hint-placeholder-count="4">
+                  <div style="background:#FFFFFF;border:1px solid {{ b.cardBd }};border-radius:18px;padding:16px;display:flex;flex-direction:column;gap:11px">
+                    <div style="display:flex;align-items:center;justify-content:space-between"><span style="display:flex;align-items:center;gap:9px;font-size:15px;font-weight:600"><span style="width:11px;height:11px;border-radius:4px;background:{{ b.color }}"></span>{{ b.cat }}</span><span style="display:inline-block;font-size:11px;font-weight:600;color:{{ b.chipTx }};background:{{ b.chipBg }};border-radius:7px;padding:3px 8px">{{ b.curLabel }}</span></div>
+                    <div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-size:14px;font-weight:600">{{ b.sym }} {{ b.spent }} <span style="color:#86868B;font-weight:400">/ {{ b.sym }} {{ b.limit }}</span></span><span style="font-size:13px;font-weight:600;color:{{ b.pctColor }}">{{ b.pctLabel }}</span></div>
+                    <div style="height:9px;border-radius:6px;background:#F0F0F2;overflow:hidden"><div style="height:100%;width:{{ b.barW }};background:{{ b.barColor }};border-radius:6px"></div></div>
+                    <sc-if value="{{ b.over }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:#C9342B;background:#FFF0EF;border:1px solid #FFD5D2;border-radius:10px;padding:8px 11px"><span style="font-size:14px">⚠</span> Sobregiro · superaste el límite por {{ b.sym }} {{ b.overBy }}</div></sc-if>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+        </div>
+      </main>
+
+      <!-- BOTTOM NAV (mobile) -->
+      <nav class="gx-bottomnav">
+        <button onClick="{{ toDash }}" style="min-width:52px;min-height:48px;display:flex;flex-direction:column;align-items:center;gap:4px;border:none;background:none;cursor:pointer;color:{{ colDash }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg><span style="font-size:10px;font-weight:600">Inicio</span></button>
+        <button onClick="{{ toHist }}" style="min-width:52px;min-height:48px;display:flex;flex-direction:column;align-items:center;gap:4px;border:none;background:none;cursor:pointer;color:{{ colHist }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="18" x2="20" y2="18"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg><span style="font-size:10px;font-weight:600">Historial</span></button>
+        <button onClick="{{ toReg }}" style="min-width:56px;min-height:56px;display:flex;align-items:center;justify-content:center;border:none;border-radius:50%;background:#0071E3;color:#fff;cursor:pointer;box-shadow:0 8px 18px -6px rgba(0,113,227,.55);margin-top:-18px"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></button>
+        <button onClick="{{ toTray }}" style="min-width:52px;min-height:48px;display:flex;flex-direction:column;align-items:center;gap:4px;border:none;background:none;cursor:pointer;color:{{ colTray }};position:relative"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg><span style="position:absolute;top:-2px;right:8px;min-width:16px;height:16px;border-radius:8px;background:#FF3B30;color:#fff;font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 4px">3</span><span style="font-size:10px;font-weight:600">Bandeja</span></button>
+        <button onClick="{{ toBudget }}" style="min-width:52px;min-height:48px;display:flex;flex-direction:column;align-items:center;gap:4px;border:none;background:none;cursor:pointer;color:{{ colBudget }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="20" x2="6" y2="12"/><line x1="12" y1="20" x2="12" y2="5"/><line x1="18" y1="20" x2="18" y2="9"/></svg><span style="font-size:10px;font-weight:600">Presup.</span></button>
+      </nav>
+
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { screen: 'dashboard', curr: 'PEN', filter: 'ALL' };
+  go = (name) => { this.setState({ screen: name }); try { window.scrollTo(0, 0); } catch (e) {} };
+
+  renderVals() {
+    const s = this.state.screen;
+    const cur = this.state.curr;
+    const f = this.state.filter;
+
+    const PEN = { sym: 'S/', chipBg: '#EEF2FF', chipTx: '#3730a3', curLabel: 'S/ PEN' };
+    const USD = { sym: '$', chipBg: '#ECFDF5', chipTx: '#047857', curLabel: '$ USD' };
+
+    const cats = [
+      { id: 'alim', name: 'Alimentación', color: '#248A3D', tint: '#E8F6EC', letter: 'A' },
+      { id: 'trans', name: 'Transporte', color: '#0A6CDB', tint: '#E7F1FE', letter: 'T' },
+      { id: 'hogar', name: 'Hogar', color: '#C2740B', tint: '#FBF0E1', letter: 'H' },
+      { id: 'ocio', name: 'Ocio', color: '#7D3CD6', tint: '#F1EAFC', letter: 'O' },
+      { id: 'salud', name: 'Salud', color: '#0E8E9E', tint: '#E3F4F6', letter: 'S' },
+      { id: 'otros', name: 'Otros', color: '#6E6E73', tint: '#F0F0F2', letter: '·' },
+    ];
+    const byName = {};
+    cats.forEach(c => byName[c.name] = c);
+
+    const titles = {
+      dashboard: ['Panel', 'Resumen de julio 2026'],
+      register: ['Registrar gasto', 'Añade un movimiento manual'],
+      history: ['Historial', 'Todos tus gastos'],
+      tray: ['Bandeja', 'Detectados en correos etiquetados “Banco”'],
+      categories: ['Categorías', 'Predefinidas y personalizadas'],
+      budgets: ['Presupuestos', 'Julio 2026'],
+    };
+    const t = titles[s] || ['Gastorin', ''];
+
+    const sb = id => ({ bg: s === id ? '#E8F0FE' : 'transparent', tx: s === id ? '#0071E3' : '#424245', fw: s === id ? 600 : 500 });
+
+    const catChart = [
+      { name: 'Alimentación', amt: '820.00', v: 820 },
+      { name: 'Transporte', amt: '540.30', v: 540 },
+      { name: 'Hogar', amt: '470.00', v: 470 },
+      { name: 'Ocio', amt: '360.50', v: 360 },
+      { name: 'Salud', amt: '260.00', v: 260 },
+    ].map(c => ({ ...c, color: byName[c.name].color, pct: Math.round(c.v / 820 * 100) + '%' }));
+
+    const trendVals = [{ m: 'Feb', v: 1980 }, { m: 'Mar', v: 2240 }, { m: 'Abr', v: 1760 }, { m: 'May', v: 2110 }, { m: 'Jun', v: 2270 }, { m: 'Jul', v: 2451 }];
+    const trend = trendVals.map((x, i) => ({ m: x.m, h: Math.round(x.v / 2451 * 100) + '%', bg: i === trendVals.length - 1 ? '#0071E3' : '#3A5A8C' }));
+
+    const setPen = () => this.setState({ curr: 'PEN' });
+    const setUsd = () => this.setState({ curr: 'USD' });
+    const active = { bg: '#fff', tx: '#1D1D1F', sh: '0 1px 3px rgba(0,0,0,.12)' };
+    const idle = { bg: 'transparent', tx: '#86868B', sh: 'none' };
+    const penS = cur === 'PEN' ? active : idle;
+    const usdS = cur === 'USD' ? active : idle;
+
+    const catsForm = cats.map((c, i) => ({ ...c, selBg: i === 0 ? c.tint : '#fff', selBd: i === 0 ? c.color : '#D2D2D7' }));
+
+    const rawExp = [
+      { desc: 'Supermercado Wong', cat: 'Alimentación', curr: 'PEN', date: '18 Jul', amt: '184.50' },
+      { desc: 'Uber al centro', cat: 'Transporte', curr: 'PEN', date: '17 Jul', amt: '23.90' },
+      { desc: 'Netflix', cat: 'Ocio', curr: 'USD', date: '15 Jul', amt: '15.99' },
+      { desc: 'Farmacia Inkafarma', cat: 'Salud', curr: 'PEN', date: '14 Jul', amt: '46.00' },
+      { desc: 'Recibo de luz', cat: 'Hogar', curr: 'PEN', date: '12 Jul', amt: '132.40' },
+      { desc: 'Spotify Premium', cat: 'Ocio', curr: 'USD', date: '10 Jul', amt: '11.99' },
+      { desc: 'Amazon (libro)', cat: 'Otros', curr: 'USD', date: '08 Jul', amt: '28.30' },
+    ];
+    const histList = rawExp.filter(e => f === 'ALL' || e.curr === f).map(e => {
+      const cc = byName[e.cat]; const m = e.curr === 'PEN' ? PEN : USD;
+      return { ...e, color: cc.color, tint: cc.tint, letter: cc.letter, sym: m.sym };
+    });
+    const curFilters = [['ALL', 'Todos'], ['PEN', 'S/ Soles'], ['USD', '$ Dólares']].map(([id, label]) => {
+      const on = f === id;
+      return { label, sel: () => this.setState({ filter: id }), bg: on ? '#1D1D1F' : '#fff', tx: on ? '#fff' : '#1D1D1F', bd: on ? '#1D1D1F' : '#D2D2D7' };
+    });
+
+    const drafts = [
+      { bank: 'BBVA · Consumo', merchant: 'Rústica San Isidro', amt: '89.90', curr: 'PEN', date: '19 Jul 2026', raw: 'COMPRA POS 4291 RUSTICA S ISIDRO', cat: 'Alimentación' },
+      { bank: 'Interbank · Consumo', merchant: 'Apple Services', amt: '9.99', curr: 'USD', date: '18 Jul 2026', raw: 'PAGO INTERNET APPLE.COM/BILL', cat: 'Ocio' },
+      { bank: 'BCP · Consumo', merchant: 'Grifo Primax', amt: '120.00', curr: 'PEN', date: '17 Jul 2026', raw: 'CONSUMO TARJETA PRIMAX AV LA', cat: 'Transporte' },
+    ].map(d => { const m = d.curr === 'PEN' ? PEN : USD; const cc = byName[d.cat]; return { ...d, sym: m.sym, chipBg: m.chipBg, chipTx: m.chipTx, curLabel: m.curLabel, catColor: cc.color }; });
+
+    const catsDefault = [
+      { name: 'Alimentación', count: 12 }, { name: 'Transporte', count: 8 }, { name: 'Hogar', count: 5 },
+      { name: 'Ocio', count: 6 }, { name: 'Salud', count: 3 }, { name: 'Otros', count: 4 },
+    ].map(c => ({ ...c, color: byName[c.name].color, letter: byName[c.name].letter }));
+    const catsCustom = [
+      { name: 'Suscripciones', color: '#C81E4A', letter: 'S', count: 4 },
+      { name: 'Mascotas', color: '#1E86B8', letter: 'M', count: 2 },
+    ];
+
+    const budgets = [
+      { cat: 'Alimentación', curr: 'PEN', spent: 820, limit: 1000 },
+      { cat: 'Transporte', curr: 'PEN', spent: 540, limit: 450 },
+      { cat: 'Ocio', curr: 'USD', spent: 48, limit: 60 },
+      { cat: 'Hogar', curr: 'PEN', spent: 470, limit: 800 },
+    ].map(b => {
+      const m = b.curr === 'PEN' ? PEN : USD; const cc = byName[b.cat];
+      const pct = Math.round(b.spent / b.limit * 100); const over = b.spent > b.limit; const near = pct >= 85 && !over;
+      const barColor = over ? '#FF3B30' : near ? '#FF9500' : '#0071E3';
+      return { cat: b.cat, color: cc.color, sym: m.sym, chipBg: m.chipBg, chipTx: m.chipTx, curLabel: m.curLabel,
+        spent: b.spent.toLocaleString('en-US', { minimumFractionDigits: 2 }), limit: b.limit.toLocaleString('en-US', { minimumFractionDigits: 2 }),
+        pctLabel: pct + '%', pctColor: over ? '#FF3B30' : '#1D1D1F', barW: Math.min(pct, 100) + '%', barColor, over,
+        overBy: (b.spent - b.limit).toLocaleString('en-US', { minimumFractionDigits: 2 }), cardBd: over ? '#FFD5D2' : '#E3E3E8' };
+    });
+
+    return {
+      isLogin: s === 'login', showApp: s !== 'login',
+      isDash: s === 'dashboard', isReg: s === 'register', isHist: s === 'history', isTray: s === 'tray', isCat: s === 'categories', isBudget: s === 'budgets',
+      pageTitle: t[0], pageSub: t[1],
+      toLogin: () => this.go('login'), toDash: () => this.go('dashboard'), toReg: () => this.go('register'),
+      toHist: () => this.go('history'), toTray: () => this.go('tray'), toCat: () => this.go('categories'), toBudget: () => this.go('budgets'),
+      sbDash: sb('dashboard'), sbReg: sb('register'), sbHist: sb('history'), sbTray: sb('tray'), sbCat: sb('categories'), sbBudget: sb('budgets'),
+      colDash: s === 'dashboard' ? '#0071E3' : '#86868B', colHist: s === 'history' ? '#0071E3' : '#86868B',
+      colTray: s === 'tray' ? '#0071E3' : '#86868B', colBudget: s === 'budgets' ? '#0071E3' : '#86868B',
+      catChart, trend,
+      regSym: cur === 'PEN' ? 'S/' : '$', setPen, setUsd,
+      penBg: penS.bg, penTx: penS.tx, penSh: penS.sh, usdBg: usdS.bg, usdTx: usdS.tx, usdSh: usdS.sh,
+      cats: catsForm, curFilters, histList, histHasItems: histList.length > 0, histEmpty: histList.length === 0,
+      drafts, catsDefault, catsCustom, budgets,
+    };
+  }
+}
+</script>
+</body>
+</html>

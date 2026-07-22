@@ -1,0 +1,256 @@
+:root {
+  --color-primario: #0e9384;
+  --color-primario-hover: #0b7a6e;
+  --color-texto: #151a18;
+  --color-texto-secundario: #5c6663;
+  --color-texto-terciario: #8b938f;
+  --color-fondo: #ffffff;
+  --color-fondo-app: #f6f7f7;
+  --color-borde: #dbe0de;
+  --color-borde-tarjeta: #ecefee;
+  --color-borde-foco: var(--color-primario);
+  --sombra-foco: 0 0 0 3px rgba(14, 147, 132, 0.14);
+  --color-error: #b91c1c;
+  --color-error-fondo: #fef2f2;
+  --color-exito: #15803d;
+  --color-exito-fondo: #f0fdf4;
+  --color-deshabilitado: #9ca3af;
+  /* Estado "cerca del límite" (>=85%) de un presupuesto: ni normal ni sobregiro. */
+  --color-advertencia: #d97706;
+  --color-advertencia-fondo: #fffbeb;
+
+  /* Colores de categoría (uso futuro: chips, íconos, gráficos). */
+  --color-categoria-alimentacion: #16a34a;
+  --color-categoria-transporte: #2563eb;
+  --color-categoria-hogar: #d97706;
+  --color-categoria-ocio: #7c3aed;
+  --color-categoria-salud: #0e9384;
+  --color-categoria-otros: #64748b;
+
+  /* Paleta ampliada para categorías personalizadas (asignación por hash del
+     nombre, ver `useColorCategoria`): mismo nombre, mismo color siempre. */
+  --color-categoria-personalizada-1: #db2777;
+  --color-categoria-personalizada-2: #ca8a04;
+  --color-categoria-personalizada-3: #0891b2;
+  --color-categoria-personalizada-4: #4f46e5;
+  --color-categoria-personalizada-5: #ea580c;
+
+  --fuente-base: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --tamano-base: 16px;
+  --tamano-titulo: 1.75rem;
+  --tamano-pequeno: 0.875rem;
+  --interlineado: 1.5;
+
+  --espacio-1: 4px;
+  --espacio-2: 8px;
+  --espacio-3: 12px;
+  --espacio-4: 16px;
+  --espacio-6: 24px;
+  --espacio-8: 32px;
+
+  --radio-borde: 14px;
+  --radio-tarjeta: 22px;
+  --ancho-maximo-formulario: 400px;
+}
+
+body {
+  font-family: var(--fuente-base);
+  font-size: var(--tamano-base);
+  line-height: var(--interlineado);
+  color: var(--color-texto);
+  background: var(--color-fondo-app);
+  margin: 0;
+}
+
+.pagina-auth {
+  max-width: var(--ancho-maximo-formulario);
+  margin: 0 auto;
+  padding: var(--espacio-6) var(--espacio-4);
+}
+
+.pagina-auth h1 {
+  font-size: var(--tamano-titulo);
+  margin-bottom: var(--espacio-6);
+}
+
+/* Páginas de autenticación: tarjeta blanca centrada (Login/Registro/
+   Recuperar/Restablecer comparten este envoltorio para dar consistencia). */
+.envoltorio-auth {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--espacio-6) var(--espacio-4);
+  background: var(--color-fondo-app);
+  box-sizing: border-box;
+}
+
+.tarjeta-auth {
+  width: 100%;
+  max-width: var(--ancho-maximo-formulario);
+  background: var(--color-fondo);
+  border: 1px solid var(--color-borde-tarjeta);
+  border-radius: var(--radio-tarjeta);
+  box-shadow: 0 12px 32px rgba(21, 26, 24, 0.06);
+  padding: var(--espacio-8) var(--espacio-6);
+  box-sizing: border-box;
+}
+
+.logo-auth {
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  background: var(--color-primario);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1.75rem;
+  margin: 0 auto var(--espacio-4);
+}
+
+.tarjeta-auth h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  text-align: center;
+  margin: 0 0 var(--espacio-1);
+}
+
+.subtitulo-auth {
+  text-align: center;
+  color: var(--color-texto-secundario);
+  font-size: var(--tamano-pequeno);
+  margin: 0 0 var(--espacio-6);
+}
+
+.fila-entre {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.pie-auth {
+  text-align: center;
+  font-size: var(--tamano-pequeno);
+  color: var(--color-texto-secundario);
+  margin-top: var(--espacio-4);
+}
+
+.grupo-campo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espacio-2);
+  margin-bottom: var(--espacio-4);
+}
+
+.grupo-campo label {
+  font-weight: 600;
+  font-size: var(--tamano-pequeno);
+  color: var(--color-texto-secundario);
+}
+
+.entrada {
+  width: 100%;
+  min-height: 50px;
+  padding: var(--espacio-3);
+  font-size: var(--tamano-base);
+  border: 1px solid var(--color-borde);
+  border-radius: var(--radio-borde);
+  font-family: var(--fuente-base);
+  box-sizing: border-box;
+  color: var(--color-texto);
+  background: var(--color-fondo);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.entrada:focus {
+  outline: none;
+  border-color: var(--color-borde-foco);
+  box-shadow: var(--sombra-foco);
+}
+.entrada:disabled {
+  background: #f3f4f6;
+  color: var(--color-deshabilitado);
+}
+
+.boton-primario {
+  min-height: 52px;
+  padding: var(--espacio-3) var(--espacio-6);
+  background: var(--color-primario);
+  color: white;
+  border: none;
+  border-radius: var(--radio-borde);
+  font-size: var(--tamano-base);
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  margin-top: var(--espacio-2);
+  font-family: var(--fuente-base);
+}
+.boton-primario:hover:not(:disabled) { background: var(--color-primario-hover); }
+.boton-primario:disabled {
+  background: var(--color-deshabilitado);
+  cursor: not-allowed;
+}
+.boton-primario.cargando {
+  color: transparent;
+  position: relative;
+}
+.boton-primario.cargando::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 18px;
+  height: 18px;
+  border: 2px solid white;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: girar 0.6s linear infinite;
+}
+@keyframes girar { to { transform: rotate(360deg); } }
+
+.mensaje-error, .mensaje-exito {
+  border-radius: var(--radio-borde);
+  padding: var(--espacio-3);
+  font-size: var(--tamano-pequeno);
+  margin-bottom: var(--espacio-4);
+}
+.mensaje-error {
+  background: var(--color-error-fondo);
+  color: var(--color-error);
+  border: 1px solid var(--color-error);
+}
+.mensaje-error::before { content: "⚠ "; }
+.mensaje-exito {
+  background: var(--color-exito-fondo);
+  color: var(--color-exito);
+  border: 1px solid var(--color-exito);
+}
+.mensaje-exito::before { content: "✓ "; }
+
+.enlace-secundario {
+  display: inline-block;
+  color: var(--color-primario);
+  font-size: var(--tamano-pequeno);
+  margin-top: var(--espacio-4);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--fuente-base);
+}
+
+/* Clase utilitaria: oculta visualmente un elemento manteniéndolo accesible y
+   presente en el DOM (necesaria para inputs nativos que siguen siendo la
+   fuente de verdad de un v-model detrás de un control visual custom). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

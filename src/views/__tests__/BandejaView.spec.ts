@@ -1,0 +1,105 @@
+import { beforeEach, describe, expect, it, type Mock } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import BandejaView from '@/views/BandejaView.vue'
+import { useGastosStore } from '@/stores/gastos'
+import { supabase } from '@/lib/supabaseClient'
+import { crearConstructorConsulta } from '@/lib/__mocks__/supabaseClient'
+import type { Gasto } from '@/types/gasto'
+
+const fromMock = supabase.from as unknown as Mock
+
+function flushPromises() {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+const borradorFalso: Gasto = {
+  id: 'b1',
+  usuario_id: 'u1',
+  categoria_id: 'c1',
+  monto: 45.5,
+  moneda: 'PEN',
+  fecha: '2026-07-20',
+  descripcion: 'Compra supermercado',
+  origen: 'correo',
+  estado: 'borrador',
+  gmail_message_id: 'msg-1',
+  gmail_fragmento: 'BCP: consumo por S/ 45.50',
+  creado_en: '',
+  actualizado_en: '',
+}
+
+/**
+ * Estas pruebas cubren HU-5.2 a nivel de integración: `onMounted` dispara
+ * `cargarCategorias`/`cargarBorradores`, por eso se estuba `from()` según la
+ * tabla consultada (mismo patrón que `HistorialView.spec.ts`).
+ */
+describe('BandejaView (HU-5.2)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('camino feliz: muestra el banner "N gastos por confirmar" y una tarjeta por borrador', async () => {
+    fromMock.mockImplementation((tabla: string) => {
+      const builder = crearConstructorConsulta()
+      if (tabla === 'gastos') {
+        ;(builder.order as Mock).mockResolvedValue({ data: [borradorFalso], error: null })
+      } else {
+        ;(builder.order as Mock).mockResolvedValue({ data: [], error: null })
+      }
+      return builder
+    })
+
+    const wrapper = mount(BandejaView)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('1 gasto por confirmar')
+    expect(wrapper.findAll('.tarjeta-borrador')).toHaveLength(1)
+    expect(wrapper.find('.estado-vacio').exists()).toBe(false)
+  })
+
+  it('estado vacío: sin borradores pendientes muestra "Bandeja al día" y sin banner', async () => {
+    fromMock.mockImplementation(() => {
+      const builder = crearConstructorConsulta()
+      ;(builder.order as Mock).mockResolvedValue({ data: [], error: null })
+      return builder
+    })
+
+    const wrapper = mount(BandejaView)
+    await flushPromises()
+
+    expect(wrapper.find('.banner-bandeja').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Bandeja al día')
+  })
+
+  it('camino feliz: al confirmar un borrador desde la tarjeta, desaparece de la bandeja', async () => {
+    fromMock.mockImplementation((tabla: string) => {
+      const builder = crearConstructorConsulta()
+      if (tabla === 'gastos') {
+        ;(builder.order as Mock).mockResolvedValue({ data: [borradorFalso], error: null })
+      } else {
+        ;(builder.order as Mock).mockResolvedValue({ data: [], error: null })
+      }
+      return builder
+    })
+
+    const store = useGastosStore()
+    const wrapper = mount(BandejaView)
+    await flushPromises()
+
+    expect(store.borradores).toHaveLength(1)
+
+    const builderConfirmar = crearConstructorConsulta()
+    fromMock.mockReturnValueOnce(builderConfirmar)
+    ;(builderConfirmar.single as Mock).mockResolvedValueOnce({
+      data: { ...borradorFalso, estado: 'confirmado' },
+      error: null,
+    })
+
+    await wrapper.find('.boton-confirmar').trigger('click')
+    await flushPromises()
+
+    expect(store.borradores).toHaveLength(0)
+    expect(wrapper.findAll('.tarjeta-borrador')).toHaveLength(0)
+  })
+})
