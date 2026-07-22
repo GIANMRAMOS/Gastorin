@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, type Mock } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useBandeja } from '@/composables/useBandeja'
 import { useGastosStore } from '@/stores/gastos'
+import { useAuthStore } from '@/stores/auth'
 import { supabase } from '@/lib/supabaseClient'
 import { crearConstructorConsulta } from '@/lib/__mocks__/supabaseClient'
 import type { Gasto } from '@/types/gasto'
@@ -283,6 +284,59 @@ describe('useBandeja', () => {
       expect(exito).toBe(false)
       expect(store.error).toBe('No se pudo actualizar la categoría del gasto.')
       expect(store.borradores).toEqual([borradorBase])
+    })
+  })
+
+  describe('cargarEstadoIngesta', () => {
+    beforeEach(() => {
+      const authStore = useAuthStore()
+      authStore.establecerUsuario({ id: 'u1', email: 'a@a.com' } as never)
+    })
+
+    it('camino feliz: devuelve la marca de tiempo de la última ejecución', async () => {
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      ;(builder.single as Mock).mockResolvedValueOnce({
+        data: { ultima_ejecucion_en: '2026-07-20T10:00:00Z' },
+        error: null,
+      })
+
+      const { cargarEstadoIngesta } = useBandeja()
+      const resultado = await cargarEstadoIngesta()
+
+      expect(resultado).toBe('2026-07-20T10:00:00Z')
+      expect(fromMock).toHaveBeenCalledWith('estado_ingesta')
+      expect(builder.eq).toHaveBeenCalledWith('usuario_id', 'u1')
+    })
+
+    it('borde: sin fila previa (error.code=PGRST116) devuelve null sin marcar error', async () => {
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      ;(builder.single as Mock).mockResolvedValueOnce({
+        data: null,
+        error: { code: 'PGRST116', message: 'no rows' },
+      })
+
+      const store = useGastosStore()
+      const { cargarEstadoIngesta } = useBandeja()
+      const resultado = await cargarEstadoIngesta()
+
+      expect(resultado).toBeNull()
+      expect(store.error).toBeNull()
+    })
+
+    it('borde: un error real de Supabase (otro code) devuelve null sin lanzar', async () => {
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      ;(builder.single as Mock).mockResolvedValueOnce({
+        data: null,
+        error: { code: '500', message: 'boom' },
+      })
+
+      const { cargarEstadoIngesta } = useBandeja()
+      const resultado = await cargarEstadoIngesta()
+
+      expect(resultado).toBeNull()
     })
   })
 })

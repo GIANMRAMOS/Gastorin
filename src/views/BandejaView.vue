@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import TarjetaBorrador from '@/components/TarjetaBorrador.vue'
 import { useBandeja } from '@/composables/useBandeja'
 import { useCategorias } from '@/composables/useCategorias'
@@ -10,13 +10,17 @@ import { useGastosStore } from '@/stores/gastos'
  * confirmar. Banner con el total, lista de tarjetas y estado vacío cuando no
  * queda nada por revisar.
  */
-const { cargarBorradores } = useBandeja()
+const { cargarBorradores, cargarEstadoIngesta } = useBandeja()
 const { cargarCategorias } = useCategorias()
 const storeGastos = useGastosStore()
 
-onMounted(() => {
+/** Marca de tiempo (ISO) de la última ejecución de la ingesta automática (HU-5.5). */
+const ultimaEjecucion = ref<string | null>(null)
+
+onMounted(async () => {
   cargarCategorias()
   cargarBorradores()
+  ultimaEjecucion.value = await cargarEstadoIngesta()
 })
 
 /** Categorías activas: únicas ofrecidas para reasignar un borrador. */
@@ -24,6 +28,27 @@ const categoriasActivas = computed(() => storeGastos.categorias.filter((c) => c.
 
 const cantidadBorradores = computed(() => storeGastos.borradores.length)
 const bandejaAlDia = computed(() => !storeGastos.cargando && cantidadBorradores.value === 0)
+
+/** Umbral (HU-5.5): más de 48h desde la última ejecución dispara la advertencia. */
+const UMBRAL_ADVERTENCIA_MS = 48 * 60 * 60 * 1000
+
+/** true si hay ejecución registrada y pasaron más de 48h desde entonces. */
+const ingestaAtrasada = computed(() => {
+  if (!ultimaEjecucion.value) return false
+  return Date.now() - new Date(ultimaEjecucion.value).getTime() > UMBRAL_ADVERTENCIA_MS
+})
+
+/** Texto del estado de la ingesta automática para los 3 casos de HU-5.5. */
+const textoEstadoIngesta = computed(() => {
+  if (!ultimaEjecucion.value) {
+    return 'Aún no se ha ejecutado la revisión automática'
+  }
+  const fechaFormateada = new Intl.DateTimeFormat('es-PE', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(ultimaEjecucion.value))
+  return `Última revisión: ${fechaFormateada}`
+})
 </script>
 
 <template>
@@ -31,6 +56,10 @@ const bandejaAlDia = computed(() => !storeGastos.cargando && cantidadBorradores.
     <h1>Bandeja</h1>
 
     <p v-if="storeGastos.error" role="alert" class="mensaje-error">{{ storeGastos.error }}</p>
+
+    <p class="estado-ingesta" :class="{ 'estado-ingesta--alerta': ingestaAtrasada }">
+      {{ textoEstadoIngesta }}
+    </p>
 
     <p v-if="cantidadBorradores > 0" class="banner-bandeja">
       {{ cantidadBorradores }} {{ cantidadBorradores === 1 ? 'gasto' : 'gastos' }} por confirmar
@@ -72,6 +101,21 @@ const bandejaAlDia = computed(() => !storeGastos.cargando && cantidadBorradores.
   padding: var(--espacio-3) var(--espacio-4);
   border-radius: var(--radio-borde);
   margin-bottom: var(--espacio-4);
+}
+
+/* Estado de la última ejecución de la ingesta automática (HU-5.5). */
+.estado-ingesta {
+  background: var(--color-fondo-app);
+  color: var(--color-texto-secundario);
+  font-size: var(--tamano-pequeno);
+  padding: var(--espacio-3) var(--espacio-4);
+  border-radius: var(--radio-borde);
+  margin: 0 0 var(--espacio-4);
+}
+
+.estado-ingesta--alerta {
+  background: var(--color-advertencia-fondo);
+  color: var(--color-advertencia);
 }
 
 .lista-borradores {

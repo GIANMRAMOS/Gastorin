@@ -1,166 +1,89 @@
-# Micro-plan — Épica 9: Versionado y trazabilidad (HU-9.1, HU-9.2)
+# Micro-plan — HU-5.5: mostrar última ejecución de la ingesta automática en la Bandeja
 
-> Reemplaza el micro-plan de la Épica 7 (Dashboard), ya construida.
-> La especificación técnica ya fue decidida por Architect y se aplica tal cual (no se rediseña).
-> Este documento solo ordena la ejecución, detecta el patrón vigente y marca dos riesgos de build
-> reales que el builder debe resolver.
+> Reemplaza el micro-plan de la Épica 9 (Versionado), ya construida.
+> Especificación técnica ya decidida por Architect y Data; se aplica tal cual.
+> Este documento ordena la ejecución, detecta el patrón vigente y marca las
+> discrepancias reales que el builder debe resolver siguiendo el CÓDIGO existente.
 
 ## Patrón arquitectónico detectado
 
-Proyecto Vue 3 + Vite 5 + TypeScript (strict) + Pinia + vue-router. Convenciones observadas:
+Frontend Vue 3 + Vite + TS (strict) + Pinia; composables por sub-dominio:
+- `src/composables/useBandeja.ts` encapsula TODAS las llamadas a Supabase del dominio Bandeja (Épica 5). Cada función: pone `cargando`, limpia error, hace `supabase.from(...)`, y ante `error` de Supabase escribe un mensaje en español en `useGastosStore` y devuelve `boolean`. Un resultado vacío NO es error.
+- `src/stores/gastos.ts` es la fuente única de verdad; los composables escriben ahí vía acciones. No hay estado de "ingesta" aún.
+- `src/views/BandejaView.vue` dispara `cargarCategorias()` + `cargarBorradores()` en `onMounted`, y renderiza banner + lista + estado vacío con clases scoped y variables de `estilos-base.css`.
+- Formateo de fechas: `Intl.DateTimeFormat('es-PE', {...})` (ver `GraficoTendenciaMensual.vue:33`) y `new Date(...)` directo. No existe util compartido de "fecha relativa": se formatea inline por vista/componente.
 
-- **Composables** en `src/composables/*.ts`, exportan `useXxx()` y devuelven un objeto. Los "puros"
-  (sin estado ni store) siguen el estilo de `useMoneda.ts` / `useColorCategoria.ts`: cero dependencias
-  de red/store, fáciles de testear. `useVersion` encaja exactamente en ese molde.
-- **Tests** en `__tests__/` colindante al archivo, nombre `*.spec.ts`, Vitest con `globals: true`
-  (las specs existentes igual importan `describe/it/expect` de `vitest` explícitamente — seguir ese
-  estilo). `environment: jsdom`, `pool: 'forks'`, setup global en `src/test/setup.ts` (mockea
-  supabaseClient; no afecta a esta épica).
-- **Estilos**: CSS `scoped` por componente + design tokens en `src/assets/estilos-base.css`
-  (`--color-texto-terciario`, `--color-texto-secundario`, `--tamano-pequeno: 0.875rem`, `--espacio-*`,
-  `--radio-borde`, `--fuente-base`). No hay librería de UI; todo con vars.
-- **Layout**: `src/layouts/AppShellLayout.vue` — `<aside class="barra-lateral">` (sidebar,
-  `display:none` por defecto, `display:flex` solo en `@media (min-width: 900px)`) y
-  `<nav class="navegacion-inferior">` (bottom-nav, se oculta en ≥900px). El bloque de cuenta es
-  `<div class="bloque-cuenta">` (líneas ~115-126), último hijo del `<aside>` con `margin-top:auto`.
-  Colocar la versión DENTRO del `<aside>` la deja automáticamente solo en sidebar (≥900px) y nunca en
-  el bottom-nav, sin CSS extra de visibilidad.
-- **Nomenclatura en español** en identificadores de dominio (funciones, refs, clases CSS).
+Backend Edge Functions (Deno) en `supabase/functions/<nombre>/index.ts`:
+- `importar-borrador/index.ts` es la referencia directa. Estructura: helpers `cabecerasJson` + `respuestaJson(cuerpo, status)`; `Deno.serve(async req => {...})`; método != POST → 405; autentica comparando el bearer contra un secreto de env; lee env (`GASTORIN_USUARIO_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`); crea `createClient(url, claveServicio)`; y ante error de escritura responde con motivo genérico SIN filtrar `error.message` (ej. `'no se pudo guardar el gasto'`).
 
-El cambio encaja de forma natural: composable puro nuevo + inyección de constantes de build vía
-`define` de Vite + un bloque de UI en el sidebar existente. Sin stores nuevos, sin rutas, sin tocar
-`useAuth`/`stores/auth` ni otros composables/stores.
+Migraciones versionadas en `supabase/migrations/NNN_*.sql`; se aplican a producción manualmente (Gianmarco), el archivo solo versiona el SQL. Ya existen 001, 002, 003; sigue la 004.
+
+Tests: en `__tests__/` colindante, `*.spec.ts`, Vitest. Mock manual de Supabase en `src/lib/__mocks__/supabaseClient.ts` con `crearConstructorConsulta()` encadenable (cada método es `vi.fn(()=>builder)`; se resuelve un eslabón con `mockResolvedValueOnce({data,error})`). El spec de la Edge Function mockea `createClient` y stubea `globalThis.Deno`.
 
 ## Desviación de arquitectura
 
-- ¿Se necesita desviarse? **NO** a nivel de arquitectura de la app. **No dispara GATE 1**: no toca el
-  modelo de datos, no cruza >1 módulo de dominio de forma estructural, no introduce un patrón nuevo.
-  Es puramente aditivo.
+- ¿Se necesita desviarse? **NO.** Todo encaja en el patrón: migración numerada, Edge Function calcada de `importar-borrador`, función nueva en `useBandeja` con la misma firma/estilo, y bloque de UI en `BandejaView.vue` reusando clases y variables ya definidas. Tabla nueva independiente (no cambia el modelo existente), no acopla >1 módulo, no introduce patrón nuevo. **No dispara GATE 1.**
 
-- **PERO hay dos ajustes de configuración de TypeScript** para que `npm run build`
-  (`vue-tsc -b && vite build`) no falle. No son desviaciones de arquitectura, pero uno es bloqueante
-  del build. Heads-up al builder (no GATE):
+### Discrepancias a resolver durante el build (ambigüedad de la consigna, NO desviación; el builder sigue el CÓDIGO real)
 
-  1. **`tsconfig.node.json` necesita `resolveJsonModule: true` (BLOQUEANTE).** El `vite.config.ts` de la
-     spec hace `import pkg from './package.json'`. `vite.config.ts` es el único `include` de
-     `tsconfig.node.json`, y ese tsconfig NO tiene `resolveJsonModule`. Sin él, `vue-tsc -b` fallará con
-     "Cannot find module './package.json'". Acción: añadir `"resolveJsonModule": true` a
-     `tsconfig.node.json`. (`scripts/resolver-version.ts`, al ser importado por `vite.config.ts`, entra
-     al mismo proyecto `node` y se type-checkea ahí; no usa DOM, así que `types: ["node"]` le basta.)
-
-  2. **`env.d.ts` está en la RAÍZ, no en `src/`.** `tsconfig.app.json` incluye solo `src/**`, así que
-     el `env.d.ts` de raíz NO está en el grafo de compilación de la app (hoy "funciona" porque
-     `import.meta.env.VITE_*` resuelve por el index signature de `vite/client`). Consecuencia: agregar
-     los 3 `declare const __GASTORIN_*__` a `env.d.ts` (raíz) es correcto **según la spec** y no rompe
-     nada, pero esas globales NO quedarán visibles para archivos de `src/` en build. Esto NO bloquea el
-     build porque `useVersion.ts` **ya declara localmente** las 3 constantes en su cabecera, y ningún
-     otro archivo de `src/` las referencia directamente. Acción: aplicar la spec tal cual. (Ver
-     Sugerencias fuera de alcance.)
+1. **Nombre del secreto del bearer.** La consigna dice "el mismo `IMPORTAR_BORRADOR_TOKEN` que ya usa `importar-borrador`", pero `importar-borrador/index.ts:37-40` NO usa `IMPORTAR_BORRADOR_TOKEN`: compara el bearer contra `Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')`. Para usar "el mismo bearer que importar-borrador" de verdad, la nueva función debe comparar contra **`SUPABASE_SERVICE_ROLE_KEY`** (mismo patrón, mismo secreto real). No inventar una env nueva sin configurar. Si el intent fuera un token dedicado distinto, requeriría añadir el secreto en Supabase → fuera del alcance de código; anotarlo, no asumirlo.
+2. **Código "no rows" de PostgREST.** El "no hay fila" de `.single()` en supabase-js llega como `error.code === 'PGRST116'` (no como `data:null, error:null`). `cargarEstadoIngesta` debe tratar ese code específico como caso válido → `null`, y solo considerar fallo un `error` con otro `code`.
 
 ## Archivos a crear/modificar
 
-**Chunk A (independiente)**
-- `scripts/resolver-version.ts` — **crear** — las dos funciones puras `resolverCommitDesdeEnv` y
-  `resolverCommitDesdeGit`, exactamente como en la spec de Architect.
-- `scripts/__tests__/resolver-version.spec.ts` — **crear** — ver Plan de pruebas.
+Chunks A, B y C son independientes (no se solapan) → paralelizables. D depende de C.
 
-**Chunk B (independiente)**
-- `src/composables/useVersion.ts` — **crear** — con las 3 `declare const` locales y `useVersion()`
-  según spec. (El directorio `src/composables/__tests__/` ya existe.)
-- `src/composables/__tests__/useVersion.spec.ts` — **crear** — ver Plan de pruebas.
+**Chunk A — Migración (independiente)**
+- `supabase/migrations/004_estado_ingesta.sql` — **crear** — SQL exacto provisto por Data (tabla `estado_ingesta`: PK `usuario_id` → `auth.users(id) on delete cascade`, `ultima_ejecucion_en timestamptz not null`; RLS on; policy `estado_ingesta_solo_lectura_propia` for select using `usuario_id = auth.uid()`). Cabecera-comentario al estilo de 003 ("Diseño: Data. Pendiente de aplicar a producción."). NO aplicar a producción.
 
-**Chunk C (config — escribible en paralelo; su validación real depende de A y B ya presentes)**
-- `vite.config.ts` — **modificar** — añadir imports (`execSync` de `node:child_process`, las dos
-  funciones de `./scripts/resolver-version`, `pkg from './package.json'`), calcular `esDev` y `commit`,
-  y agregar el bloque `define: { __GASTORIN_VERSION__, __GASTORIN_COMMIT__, __GASTORIN_ES_DEV__ }`
-  DENTRO de `defineConfig({...})` sin tocar `plugins`, `resolve.alias` ni `test`.
-- `tsconfig.node.json` — **modificar** — añadir `"resolveJsonModule": true` (ver riesgo #1).
-- `env.d.ts` — **modificar** — añadir las 3 `declare const __GASTORIN_VERSION__ / __GASTORIN_COMMIT__ /
-  __GASTORIN_ES_DEV__` (ver riesgo #2; aplicar según spec).
+**Chunk B — Edge Function (independiente)**
+- `supabase/functions/registrar-ejecucion-ingesta/index.ts` — **crear** — calcar estructura de `importar-borrador/index.ts`:
+  - `respuestaJson` + `cabecerasJson`.
+  - método != POST → 405.
+  - Auth: bearer vs `SUPABASE_SERVICE_ROLE_KEY` (ver discrepancia #1); no coincide → 401 `{status:'error', motivo:'no autorizado'}`.
+  - Sin payload requerido: NO parsear/validar body como obligatorio; no debe fallar si no viene body.
+  - Leer `GASTORIN_USUARIO_ID` (500 si falta) y `SUPABASE_URL` (500 si falta).
+  - `createClient(url, claveServicio)`; `supabase.from('estado_ingesta').upsert({ usuario_id: usuarioId, ultima_ejecucion_en: new Date().toISOString() })` (upsert sobre PK `usuario_id`).
+  - Éxito → 201 `{status:'registrado'}`. Error de escritura → 500 con motivo genérico (sin filtrar `error.message`).
+- `supabase/functions/registrar-ejecucion-ingesta/__tests__/index.spec.ts` — **crear** — mismo andamiaje que `importar-borrador/__tests__/index.spec.ts`. Casos: 201 `registrado` en upsert ok (verificar que el `upsert` recibió el `usuario_id` fijo del servidor y un `ultima_ejecucion_en`); 401 con bearer inválido; 405 con GET; 500 si el upsert devuelve `error`.
 
-**Chunk D (depende de Chunk B: importa `useVersion`)**
-- `src/layouts/AppShellLayout.vue` — **modificar** — en `<script setup>` importar y usar `useVersion()`
-  (`textoVersion`, `commitCompleto`); añadir un `ref` de confirmación "Copiado" y una función
-  `copiarCommit()` que llame a `navigator.clipboard.writeText(commitCompleto)` SOLO si `commitCompleto`
-  no es null, y active la confirmación breve (ref true + `setTimeout` para limpiarla). En `<template>`,
-  debajo del `<div class="bloque-cuenta">` y aún DENTRO del `<aside class="barra-lateral">`, renderizar
-  `textoVersion`. El hash de commit es el elemento tocable que dispara `copiarCommit`; si
-  `commitCompleto` es null, NO debe ser interactivo. Añadir clases scoped mínimas (`.texto-version` con
-  `font-size: var(--tamano-pequeno)` o menor y `color: var(--color-texto-terciario)`) reusando tokens.
-  NO tocar la lógica de cuenta/salir/nav existente.
-- `src/layouts/__tests__/AppShellLayout.spec.ts` — **modificar** (añadir un `describe` nuevo para
-  HU-9.1; NO tocar el bloque HU-8.5 existente) — ver Plan de pruebas.
+**Chunk C — Composable (independiente)**
+- `src/composables/useBandeja.ts` — **modificar** — añadir y exportar `cargarEstadoIngesta()`:
+  - `supabase.from('estado_ingesta').select('ultima_ejecucion_en').eq('usuario_id', <uid>).single()`. Para el `uid`: NO tocar `useAuth`/`stores/auth` (prohibido). Preferir la vía de menor acoplamiento — apoyarse en RLS (que ya restringe a la fila propia) usando el id de la sesión de `supabase.auth` directamente si es necesario para el `.eq`, o mantener el `.eq('usuario_id', ...)` como pide la HU. Documentar la decisión en comentario.
+  - Manejo de resultado: `error?.code === 'PGRST116'` (no rows) → devolver `null` SIN marcar error; `error` con otro code → devolver `null` sin romper la vista; ok → `data?.ultima_ejecucion_en ?? null`.
+  - Firma sugerida: `async function cargarEstadoIngesta(): Promise<string | null>`. NO ampliar `useGastosStore` para este dato de presentación puntual: la vista guarda el valor en un `ref` local. Añadirla al `return`.
+- `src/composables/__tests__/useBandeja.spec.ts` — **modificar** — nuevo `describe('cargarEstadoIngesta')`: (1) feliz → devuelve el timestamp; (2) no rows `error.code='PGRST116'` → `null` sin error; (3) error real (otro code) → `null` sin lanzar. Resolver el `single` con `mockResolvedValueOnce({data,error})`.
 
-Orden sugerido de build paralelo: A y B en paralelo → C → D. Validación final (build + tests) secuencial.
+**Chunk D — UI (depende de C)**
+- `src/views/BandejaView.vue` — **modificar**:
+  - `onMounted`: además de las 2 llamadas actuales, `cargarEstadoIngesta()` y guardar el resultado en un `ref<string | null>` local (ej. `ultimaEjecucion`).
+  - `computed` para los 3 casos de HU-5.5 comparando con `Date.now()`:
+    - `null` → texto neutral "Aún no se ha ejecutado la revisión automática".
+    - dentro de 48h → "Última revisión: [fecha formateada]" neutral.
+    - > 48h (`Date.now() - Date(ultimaEjecucion) > 48*60*60*1000`) → mismo texto con indicador de advertencia.
+  - Formateo con `Intl.DateTimeFormat('es-PE', { dateStyle:'medium', timeStyle:'short' })` (o equivalente), consistente con el uso de `Intl` en el proyecto.
+  - Colocar el bloque cerca del `p.banner-bandeja`. Reusar el look de banner; para >48h aplicar `--color-advertencia` / `--color-advertencia-fondo` (ya en `estilos-base.css:19-20`) vía una clase modificadora scoped (ej. `.estado-ingesta--alerta`). Añadir una clase/marca estable para los tests (ej. `.estado-ingesta`).
+  - NO tocar la lógica de borradores/banner/estado-vacío existente.
+- `src/views/__tests__/BandejaView.spec.ts` — **modificar** — los 3 tests actuales deben seguir pasando: ahora `onMounted` hace una consulta extra a `estado_ingesta`; ajustar el `fromMock.mockImplementation` para contemplar `tabla === 'estado_ingesta'` devolviendo un builder cuyo `single` resuelva lo que cada caso necesite. Añadir 3 casos nuevos (usar `vi.setSystemTime`, precedente `DashboardView.spec.ts:64`): sin ejecución (single → PGRST116 / `data:null`) muestra "Aún no se ha ejecutado…"; ejecución < 48h muestra "Última revisión: …" sin clase de alerta; ejecución > 48h muestra el texto con la clase/indicador de advertencia.
 
 ## Plan de pruebas
 
-### `scripts/__tests__/resolver-version.spec.ts`
-- Camino feliz `resolverCommitDesdeEnv`: con `{ VERCEL_GIT_COMMIT_SHA: '1234567890abcdef' }` → `'1234567'`
-  (recorta a 7).
-- Borde `resolverCommitDesdeEnv`: sin la var (`{}`) → `null`.
-- Camino feliz `resolverCommitDesdeGit`: `ejecutar` que devuelve `'abcdef1\n'` → `'abcdef1'` (trim).
-- Borde `resolverCommitDesdeGit`: `ejecutar` que devuelve `''`/whitespace → `null` (por `|| null`).
-- Error `resolverCommitDesdeGit`: `ejecutar` que lanza → `null`, sin propagar la excepción.
+- **Camino feliz (UI):** fila reciente (< 48h) → "Última revisión: [fecha/hora]" neutral; borradores intactos.
+- **Camino feliz (Edge):** POST con bearer correcto → 201 `{status:'registrado'}`; el upsert usa `usuario_id` fijo del servidor + `ultima_ejecucion_en` ≈ ahora.
+- **Camino feliz (composable):** `cargarEstadoIngesta` devuelve el `ultima_ejecucion_en` cuando hay fila.
+- **Borde/error:**
+  - Sin fila (`PGRST116`): composable → `null` sin error; UI muestra "Aún no se ha ejecutado la revisión automática".
+  - Ejecución > 48h: UI con indicador `--color-advertencia`.
+  - Edge: bearer inválido → 401; GET → 405; error de upsert → 500 con motivo genérico (sin filtrar detalle interno).
+  - Error real de Supabase en `cargarEstadoIngesta` (code != PGRST116) → `null` sin romper el render de la Bandeja.
+- **Criterios de aceptación HU-5.5 (3 escenarios como casos de `BandejaView.spec.ts`):**
+  1. Sin ejecución previa → mensaje neutral "Aún no se ha ejecutado la revisión automática".
+  2. Ejecución dentro de 48h → "Última revisión: [fecha]" neutral, sin advertencia.
+  3. Ejecución > 48h → mismo texto con indicador visual de advertencia (`--color-advertencia`).
 
-### `src/composables/__tests__/useVersion.spec.ts`
-Usar `vi.stubGlobal('__GASTORIN_VERSION__', ...)` etc. sobre las 3 constantes; `vi.unstubAllGlobals()`
-en `afterEach`. (Los identificadores bare de `useVersion.ts` resuelven contra `globalThis`, que es lo
-que modifica `vi.stubGlobal`.)
-- Con commit + prod: version `'1.2.3'`, commit `'abc1234'`, esDev `false` →
-  `textoVersion === 'v1.2.3 · abc1234'` (separador `·`), `commitCompleto === 'abc1234'`.
-- Sin commit: commit `null` → `textoVersion` contiene `'sin commit'`, `commitCompleto === null`.
-- Dev: esDev `true` → `textoVersion` incluye el sufijo `-dev` (ej. `'v1.2.3-dev · ...'`).
+## Notas / fuera de alcance (no meter al build)
 
-### `src/layouts/__tests__/AppShellLayout.spec.ts` (nuevo describe — HU-9.1)
-Reutilizar el helper `montarShell` existente (router en memoria + authStore). Para aislar del build,
-preferible `vi.mock('@/composables/useVersion', ...)` y controlar `textoVersion`/`commitCompleto` por
-caso (alternativa: `vi.stubGlobal` de las 3 globales).
-- Camino feliz: `textoVersion` aparece renderizado dentro del `<aside class="barra-lateral">` (buscar
-  por `.texto-version` o el texto).
-- Copia: mockear `navigator.clipboard.writeText` (`vi.fn()` vía `Object.defineProperty`/`vi.stubGlobal`);
-  al hacer click en el elemento del hash se llama con `commitCompleto` completo y aparece "Copiado".
-- Borde: con `commitCompleto === null`, el hash no es tocable / no hay elemento interactivo → assert
-  que `writeText` NO fue llamado.
-
-### Criterios de aceptación (HU)
-
-**HU-9.1 — Versión visible y hash copiable**
-```gherkin
-Escenario: Versión visible en el sidebar de escritorio
-  Dado que estoy autenticado en una vista privada
-  Cuando veo el sidebar (≥900px)
-  Entonces bajo el bloque de cuenta veo el texto de versión (vX.Y.Z[-dev] · <commit|sin commit>)
-  Y ese texto NO aparece en el bottom-nav móvil
-
-Escenario: Copiar el hash de commit
-  Dado que el commit se resolvió en build (commitCompleto no es null)
-  Cuando toco el hash de commit
-  Entonces se copia el commit completo al portapapeles
-  Y veo una confirmación breve "Copiado"
-
-Escenario: Sin commit disponible
-  Dado que el build no resolvió commit (commitCompleto es null)
-  Cuando veo la versión
-  Entonces muestra "sin commit" y el hash no es tocable (no intenta copiar nada)
-```
-
-**HU-9.2 — Trazabilidad build → runtime**
-- El commit se resuelve en build con precedencia: Vercel env (`VERCEL_GIT_COMMIT_SHA`, recortado a 7) →
-  `git rev-parse --short HEAD` → `null`. Cubierto por `resolver-version.spec` y el caso "sin commit" de
-  `useVersion.spec`.
-- **Caso real de este repo**: no hay commits, así que `git rev-parse` fallará y el build debe producir
-  `__GASTORIN_COMMIT__ = null`, con la UI mostrando "sin commit". Es la degradación esperada a verificar
-  en el `npm run build` final (el build NO debe fallar por esto).
-
-## Verificación final (a cargo del builder)
-- `npm run build` (`vue-tsc -b && vite build`): debe pasar. Prerrequisito: aplicar el ajuste
-  `resolveJsonModule: true` en `tsconfig.node.json` (riesgo #1), o fallará el type-check. Confirmar que
-  con git sin commits el commit degrada a `null` sin romper el build.
-- `npm run test:run` (`vitest run`): toda la suite verde, incluidas las 3 specs nuevas y el describe
-  añadido a `AppShellLayout.spec.ts`.
-
-## Sugerencias fuera de alcance (NO incluir en este build)
-- Considerar mover `env.d.ts` a `src/` (o incluir la raíz en `tsconfig.app.json`) para que las globales
-  de build y `ImportMetaEnv` estén realmente en el grafo de tipos de la app. Hoy es un no-op inofensivo;
-  fuera del alcance de esta épica.
+- `npm run build` al final; reportar el resultado exacto (lo hace el builder).
+- **Falta aplicar la migración 004 a producción** (manual, Gianmarco) — avisar al orquestador al terminar.
+- Actualización del prompt de la tarea programada `gastorin-ingesta-diaria` para llamar a la nueva Edge Function: FUERA de alcance (orquestador, herramienta de tareas programadas).
+- Sugerencia (fuera de alcance): si a futuro los secretos de Edge Functions deben divergir del service-role key, introducir un token dedicado por función y documentarlo en `.env.example`/config de Supabase. Hoy no aporta y añade superficie de configuración.

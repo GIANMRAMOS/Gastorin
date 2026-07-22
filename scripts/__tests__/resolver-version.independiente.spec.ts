@@ -5,17 +5,21 @@ import { resolverCommitDesdeEnv, resolverCommitDesdeGit } from '../resolver-vers
 /**
  * Validación INDEPENDIENTE del build de Épica 9 (Versionado), separada de
  * `resolver-version.spec.ts` de dev-builder. No mockea `execSync`: ejercita
- * la función real contra el repo real de este proyecto (que hoy no tiene
- * commits), para corroborar la degradación a `null` sin depender de que el
- * mock del builder refleje fielmente el comportamiento real de git.
+ * la función real contra el repo real de este proyecto, para corroborar que
+ * nunca lanza y siempre devuelve o un hash corto real (repo con commits) o
+ * `null` (repo sin commits/sin git) — sin acoplarse al estado transitorio
+ * del repo en el momento en que se escribió este test (ver historial: el
+ * repo no tenía commits al principio, y sí los tiene desde entonces).
  */
 describe('resolverCommitDesdeGit — contra el repo real (sin mocks)', () => {
-  it('con execSync real y este repo sin commits, devuelve null sin lanzar', () => {
+  it('con execSync real, nunca lanza y devuelve un hash corto válido o null', () => {
     let resultado: string | null = null
     expect(() => {
       resultado = resolverCommitDesdeGit((comando) => execSync(comando, { encoding: 'utf-8' }))
     }).not.toThrow()
-    expect(resultado).toBe(null)
+    if (resultado !== null) {
+      expect(resultado).toMatch(/^[0-9a-f]{4,40}$/)
+    }
   })
 })
 

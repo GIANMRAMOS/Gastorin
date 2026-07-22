@@ -3,8 +3,11 @@
 // Edge Function de ingesta de gastos por correo (HU-5.1). Contrato definido
 // por Architect en Fase 0, aplicado tal cual (ver dev-plan.md):
 //
-// - Autenticación: bearer contra el secreto de service role (nunca se expone
-//   en frontend; solo la llama el proceso backend que lee el correo).
+// - Autenticación: bearer contra el secreto dedicado `IMPORTAR_BORRADOR_TOKEN`
+//   (nunca se expone en frontend; solo la llama el proceso backend que lee el
+//   correo). Se usa un token dedicado, distinto del `service_role`, siguiendo
+//   el hallazgo de auditoría AUD-SOD-01: el `service_role` sigue empleándose
+//   igual, pero solo internamente, para el `createClient`.
 // - `usuario_id` SIEMPRE es el fijo del servidor: el del payload, si viene,
 //   se ignora (no falsificable).
 // - `estado='revision_manual'` si `ambiguo:true` o falta `monto`/`moneda`
@@ -33,11 +36,11 @@ Deno.serve(async (req: Request) => {
     return respuestaJson({ status: 'error', motivo: 'método no soportado' }, 405)
   }
 
-  // --- Autenticación: el bearer debe coincidir con el secreto de service role. ---
-  const claveServicio = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  // --- Autenticación: el bearer debe coincidir con el token dedicado de esta función. ---
+  const tokenEsperado = Deno.env.get('IMPORTAR_BORRADOR_TOKEN')
   const autorizacion = req.headers.get('Authorization') ?? ''
   const bearerRecibido = autorizacion.startsWith('Bearer ') ? autorizacion.slice('Bearer '.length) : ''
-  if (!claveServicio || bearerRecibido !== claveServicio) {
+  if (!tokenEsperado || bearerRecibido !== tokenEsperado) {
     return respuestaJson({ status: 'error', motivo: 'no autorizado' }, 401)
   }
 
@@ -63,6 +66,13 @@ Deno.serve(async (req: Request) => {
 
   const urlSupabase = Deno.env.get('SUPABASE_URL')
   if (!urlSupabase) {
+    return respuestaJson({ status: 'error', motivo: 'configuración de Supabase ausente' }, 500)
+  }
+
+  // El `service_role` sigue usándose igual, pero solo internamente, para el
+  // `createClient` (nunca se compara contra el bearer recibido).
+  const claveServicio = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (!claveServicio) {
     return respuestaJson({ status: 'error', motivo: 'configuración de Supabase ausente' }, 500)
   }
 

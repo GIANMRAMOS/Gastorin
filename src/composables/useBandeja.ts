@@ -1,6 +1,10 @@
+import { useAuthStore } from '@/stores/auth'
 import { useGastosStore } from '@/stores/gastos'
 import { supabase } from '@/lib/supabaseClient'
 import type { BorradorInput, Gasto } from '@/types/gasto'
+
+/** Código de PostgREST cuando `.single()` no encuentra ninguna fila ("no rows"). */
+const CODIGO_POSTGREST_SIN_FILAS = 'PGRST116'
 
 /**
  * Composable que encapsula todas las llamadas a Supabase para el dominio de
@@ -10,6 +14,7 @@ import type { BorradorInput, Gasto } from '@/types/gasto'
  */
 export function useBandeja() {
   const store = useGastosStore()
+  const authStore = useAuthStore()
 
   /**
    * Carga los borradores pendientes de revisión del usuario autenticado
@@ -129,10 +134,57 @@ export function useBandeja() {
     }
   }
 
+  /**
+   * Carga la marca de tiempo de la última ejecución de la ingesta automática
+   * (HU-5.5), para que la Bandeja pueda avisar si dejó de correr. Es un dato
+   * puntual de presentación: NO se guarda en `useGastosStore`, la vista lo
+   * mantiene en un `ref` local.
+   *
+   * Para el `usuario_id` se reutiliza `authStore.usuario?.id` (ya cargado en
+   * la sesión, sin llamada extra a `supabase.auth`), el mismo dato que usa
+   * `useGastos.crearGasto` para completar el `usuario_id` explícito que exige
+   * la policy RLS. La policy de `estado_ingesta` ya restringe el `select` a
+   * la fila propia (`usuario_id = auth.uid()`); el `.eq(...)` explícito es
+   * defensivo y documenta la intención.
+   *
+   * Un resultado sin fila (`error.code === 'PGRST116'`, "no rows" de
+   * PostgREST) NO es un error: significa que la ingesta nunca corrió para
+   * este usuario. Cualquier otro error tampoco debe romper el render de la
+   * Bandeja (se sigue devolviendo `null`), pero SÍ debe quedar registrado en
+   * el store (`store.establecerError`) para no confundir "nunca corrió" con
+   * "no se pudo confirmar el estado".
+   */
+  async function cargarEstadoIngesta(): Promise<string | null> {
+    const usuarioId = authStore.usuario?.id
+    if (!usuarioId) {
+      return null
+    }
+
+    const { data, error } = await supabase
+      .from('estado_ingesta')
+      .select('ultima_ejecucion_en')
+      .eq('usuario_id', usuarioId)
+      .single()
+
+    if (error) {
+      if (error.code === CODIGO_POSTGREST_SIN_FILAS) {
+        // "No rows": la ingesta nunca corrió para este usuario, no es un fallo.
+        return null
+      }
+      // Cualquier otro error es un fallo real (ej. de conexión): no debe
+      // confundirse con "nunca corrió", así que queda registrado en el store.
+      store.establecerError('No se pudo verificar el estado de la última ingesta.')
+      return null
+    }
+
+    return data?.ultima_ejecucion_en ?? null
+  }
+
   return {
     cargarBorradores,
     confirmarBorrador,
     descartarBorrador,
     editarCategoriaBorrador,
+    cargarEstadoIngesta,
   }
 }

@@ -22,3 +22,6 @@ supabase/.temp
 
 # artefactos de build
 *.timestamp-*.mjs
+
+# configuración personal de Claude Code (no compartir con el equipo)
+.claude/settings.local.json

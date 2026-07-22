@@ -40,7 +40,8 @@ vi.mock('https://esm.sh/@supabase/supabase-js@2.45.4', () => ({
   env: {
     get: (key: string) => {
       const valores: Record<string, string> = {
-        SUPABASE_SERVICE_ROLE_KEY: 'clave-servicio-test',
+        IMPORTAR_BORRADOR_TOKEN: 'clave-servicio-test',
+        SUPABASE_SERVICE_ROLE_KEY: 'clave-service-role-interna-test',
         GASTORIN_USUARIO_ID: 'usuario-fijo-servidor',
         SUPABASE_URL: 'https://proyecto.supabase.co',
       }
@@ -187,7 +188,7 @@ describe('Edge Function importar-borrador (index.ts) — validación independien
     expect(insertArg.moneda).toBeNull()
   })
 
-  it('rechaza con 401 si el bearer no coincide con el secreto de service role', async () => {
+  it('rechaza con 401 si el bearer no coincide con el token dedicado IMPORTAR_BORRADOR_TOKEN', async () => {
     const req = crearRequest({ gmail_message_id: 'msg-x', fecha: '2026-07-20' }, 'clave-falsa')
     const res = await capturedHandler!(req)
     expect(res.status).toBe(401)
