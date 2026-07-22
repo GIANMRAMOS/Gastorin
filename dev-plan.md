@@ -1,89 +1,136 @@
-# Micro-plan — HU-5.5: mostrar última ejecución de la ingesta automática en la Bandeja
-
-> Reemplaza el micro-plan de la Épica 9 (Versionado), ya construida.
-> Especificación técnica ya decidida por Architect y Data; se aplica tal cual.
-> Este documento ordena la ejecución, detecta el patrón vigente y marca las
-> discrepancias reales que el builder debe resolver siguiendo el CÓDIGO existente.
+# Micro-plan — Épica 11 (Ingresos) + retrofit "Banco" en Gastos
 
 ## Patrón arquitectónico detectado
 
-Frontend Vue 3 + Vite + TS (strict) + Pinia; composables por sub-dominio:
-- `src/composables/useBandeja.ts` encapsula TODAS las llamadas a Supabase del dominio Bandeja (Épica 5). Cada función: pone `cargando`, limpia error, hace `supabase.from(...)`, y ante `error` de Supabase escribe un mensaje en español en `useGastosStore` y devuelve `boolean`. Un resultado vacío NO es error.
-- `src/stores/gastos.ts` es la fuente única de verdad; los composables escriben ahí vía acciones. No hay estado de "ingesta" aún.
-- `src/views/BandejaView.vue` dispara `cargarCategorias()` + `cargarBorradores()` en `onMounted`, y renderiza banner + lista + estado vacío con clases scoped y variables de `estilos-base.css`.
-- Formateo de fechas: `Intl.DateTimeFormat('es-PE', {...})` (ver `GraficoTendenciaMensual.vue:33`) y `new Date(...)` directo. No existe util compartido de "fecha relativa": se formatea inline por vista/componente.
+El proyecto sigue una arquitectura por capas muy consistente que las decisiones de Architect/UX replican al pie de la letra:
 
-Backend Edge Functions (Deno) en `supabase/functions/<nombre>/index.ts`:
-- `importar-borrador/index.ts` es la referencia directa. Estructura: helpers `cabecerasJson` + `respuestaJson(cuerpo, status)`; `Deno.serve(async req => {...})`; método != POST → 405; autentica comparando el bearer contra un secreto de env; lee env (`GASTORIN_USUARIO_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`); crea `createClient(url, claveServicio)`; y ante error de escritura responde con motivo genérico SIN filtrar `error.message` (ej. `'no se pudo guardar el gasto'`).
+- **Vistas** (`src/views/*.vue`): orquestan. Cargan datos en `onMounted` vía composables, mantienen estado de UI local (modales, filtros) con `ref`, leen listas desde el store con `computed`. Máx. ancho 720px, cabecera con botón "+ Nuevo". Gemelos a clonar: `CategoriasView.vue` (catálogo) e `HistorialView.vue` (listado + filtros + modal alta/edición).
+- **Composables de dominio** (`src/composables/use*.ts`): ÚNICO punto que habla con Supabase. Cada función hace `store.establecerCargando(true)` / `limpiarError()` en `try/finally`, mapea errores a mensajes en español y escribe el resultado en el store. Devuelven `boolean` de éxito. `useCategorias` ya traduce el código Postgres `23505` (unicidad) a texto claro — patrón exacto a reusar para bancos duplicados (constante `CODIGO_POSTGRES_UNICIDAD = '23505'`).
+- **Stores Pinia** (`src/stores/*.ts`): estado + mutaciones síncronas (`establecerX`, `agregarX`, `actualizarX`, `quitarX`, `establecerCargando`, `establecerError`, `limpiarError`). No tocan Supabase. `stores/ui.ts` es transversal (`modalAbierto`) y gobierna el `v-show` del bottom nav.
+- **Componentes**: `Modal*.vue` (overlay + cierre por backdrop/Escape/botón; llama `storeUi.abrirModal()`/`cerrarModal()` en `onMounted`/`onUnmounted`) que envuelve un `Formulario*.vue` (validación local en `validarFormulario()`, `errorValidacion` propio, muestra `store.error` como fallback). Presentacionales puros con `v-model`/emit (`ToggleMoneda`, `FiltrosHistorial`, `TarjetaResumenMoneda`).
+- **Tipos** (`src/types/gasto.ts`): interfaces espejo de las tablas + tipos `*Input` para payloads editables.
+- **Funciones puras de agregación** en `useDashboard.ts` (exportadas sueltas, sin estado): reciben filas y devuelven agregados; la vista resuelve nombres contra el store.
 
-Migraciones versionadas en `supabase/migrations/NNN_*.sql`; se aplican a producción manualmente (Gianmarco), el archivo solo versiona el SQL. Ya existen 001, 002, 003; sigue la 004.
-
-Tests: en `__tests__/` colindante, `*.spec.ts`, Vitest. Mock manual de Supabase en `src/lib/__mocks__/supabaseClient.ts` con `crearConstructorConsulta()` encadenable (cada método es `vi.fn(()=>builder)`; se resuelve un eslabón con `mockResolvedValueOnce({data,error})`). El spec de la Edge Function mockea `createClient` y stubea `globalThis.Deno`.
+Conclusión: la Épica 11 es una réplica de patrones ya probados. No hay que inventar nada salvo el bottom sheet `HojaAccionesFab.vue` (UX), que reutiliza el patrón de overlay/cierre de `ModalGasto`.
 
 ## Desviación de arquitectura
 
-- ¿Se necesita desviarse? **NO.** Todo encaja en el patrón: migración numerada, Edge Function calcada de `importar-borrador`, función nueva en `useBandeja` con la misma firma/estilo, y bloque de UI en `BandejaView.vue` reusando clases y variables ya definidas. Tabla nueva independiente (no cambia el modelo existente), no acopla >1 módulo, no introduce patrón nuevo. **No dispara GATE 1.**
+- **¿Se necesita desviarse? NO.**
 
-### Discrepancias a resolver durante el build (ambigüedad de la consigna, NO desviación; el builder sigue el CÓDIGO real)
+Ninguna decisión de Architect/UX rompe el patrón existente. Observaciones que NO son desviación estructural (no disparan GATE 1), pero que el builder debe tener presentes:
 
-1. **Nombre del secreto del bearer.** La consigna dice "el mismo `IMPORTAR_BORRADOR_TOKEN` que ya usa `importar-borrador`", pero `importar-borrador/index.ts:37-40` NO usa `IMPORTAR_BORRADOR_TOKEN`: compara el bearer contra `Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')`. Para usar "el mismo bearer que importar-borrador" de verdad, la nueva función debe comparar contra **`SUPABASE_SERVICE_ROLE_KEY`** (mismo patrón, mismo secreto real). No inventar una env nueva sin configurar. Si el intent fuera un token dedicado distinto, requeriría añadir el secreto en Supabase → fuera del alcance de código; anotarlo, no asumirlo.
-2. **Código "no rows" de PostgREST.** El "no hay fila" de `.single()` en supabase-js llega como `error.code === 'PGRST116'` (no como `data:null, error:null`). `cargarEstadoIngesta` debe tratar ese code específico como caso válido → `null`, y solo considerar fallo un `error` con otro `code`.
+1. **`banco_id` obligatorio en `Gasto`/`GastoInput`** (migración 006 ya aplicada). Es un cambio del modelo de datos, pero ya está migrado en producción; el frontend solo lo consume. Ripple conocido y acotado: añadir el campo al tipo y al selector del formulario de gasto, y actualizar tests de Épica 2 que afirman el payload exacto (ver Plan de pruebas). Encaja en el patrón; no es un patrón nuevo.
+2. **Lectura cross-dominio del catálogo de bancos.** Architect decidió que el estado de bancos vive en `stores/ingresos.ts`. Como el formulario y el historial de GASTOS también necesitan la lista de bancos, leerán ese store/composable (`useBancos`) desde el dominio de gastos. Acoplamiento aceptado por decisión de Architect (bancos es catálogo compartido), no una desviación a resolver aquí. Se documenta para que el builder no lo "arregle" moviéndolo.
+3. **`HojaAccionesFab.vue`** es un patrón visual nuevo (bottom sheet), pero se apoya en el mismo mecanismo de overlay/cierre/`storeUi.abrirModal()` ya existente. Contrato importante: debe llamar `storeUi.abrirModal()` al montarse para que el bottom nav se oculte detrás de la hoja (así el test existente del FAB en `AppShellLayout.spec` sigue verde — ver Plan de pruebas).
 
 ## Archivos a crear/modificar
 
-Chunks A, B y C son independientes (no se solapan) → paralelizables. D depende de C.
+### Tipos
+- `src/types/ingreso.ts` — crear — `Banco` (id, usuario_id, nombre, created_at), `Ingreso` (id, usuario_id, banco_id, fecha, moneda, importe, concepto, created_at), `IngresoInput` (banco_id, fecha, moneda, importe, concepto). Reusa `Moneda` importado de `./gasto`.
+- `src/types/gasto.ts` — modificar — añadir `banco_id: string` a `interface Gasto` y a `interface GastoInput`. (Los borradores de correo ya traen banco_id por el backfill de la migración 006; no se hace nullable.)
 
-**Chunk A — Migración (independiente)**
-- `supabase/migrations/004_estado_ingesta.sql` — **crear** — SQL exacto provisto por Data (tabla `estado_ingesta`: PK `usuario_id` → `auth.users(id) on delete cascade`, `ultima_ejecucion_en timestamptz not null`; RLS on; policy `estado_ingesta_solo_lectura_propia` for select using `usuario_id = auth.uid()`). Cabecera-comentario al estilo de 003 ("Diseño: Data. Pendiente de aplicar a producción."). NO aplicar a producción.
+### Store
+- `src/stores/ingresos.ts` — crear — estado `ingresos: Ingreso[]`, `bancos: Banco[]`, `cargando`, `error`. Mutaciones espejo de `gastos.ts`: `establecerIngresos`, `agregarIngreso`, `establecerBancos`, `agregarBanco`, `establecerCargando`, `establecerError`, `limpiarError`. (Sin editar/eliminar ingreso ni banco: no está en las HU; ver sugerencias fuera de alcance.)
 
-**Chunk B — Edge Function (independiente)**
-- `supabase/functions/registrar-ejecucion-ingesta/index.ts` — **crear** — calcar estructura de `importar-borrador/index.ts`:
-  - `respuestaJson` + `cabecerasJson`.
-  - método != POST → 405.
-  - Auth: bearer vs `SUPABASE_SERVICE_ROLE_KEY` (ver discrepancia #1); no coincide → 401 `{status:'error', motivo:'no autorizado'}`.
-  - Sin payload requerido: NO parsear/validar body como obligatorio; no debe fallar si no viene body.
-  - Leer `GASTORIN_USUARIO_ID` (500 si falta) y `SUPABASE_URL` (500 si falta).
-  - `createClient(url, claveServicio)`; `supabase.from('estado_ingesta').upsert({ usuario_id: usuarioId, ultima_ejecucion_en: new Date().toISOString() })` (upsert sobre PK `usuario_id`).
-  - Éxito → 201 `{status:'registrado'}`. Error de escritura → 500 con motivo genérico (sin filtrar `error.message`).
-- `supabase/functions/registrar-ejecucion-ingesta/__tests__/index.spec.ts` — **crear** — mismo andamiaje que `importar-borrador/__tests__/index.spec.ts`. Casos: 201 `registrado` en upsert ok (verificar que el `upsert` recibió el `usuario_id` fijo del servidor y un `ultima_ejecucion_en`); 401 con bearer inválido; 405 con GET; 500 si el upsert devuelve `error`.
+### Composables
+- `src/composables/useBancos.ts` — crear — `cargarBancos()` (`select().order('nombre')` → `establecerBancos`) y `crearBanco(nombre)` (insert con `usuario_id` explícito; mapea `23505` → "Ya existe un banco con ese nombre.", otros → "No se pudo crear el banco."). Espejo de `useCategorias` (sin abreviaturas). Escribe en `useIngresosStore`.
+- `src/composables/useIngresos.ts` — crear — `cargarIngresos()` (`select().order('fecha', { ascending: false })` → `establecerIngresos`) y `crearIngreso(input: IngresoInput)` (insert con `usuario_id` explícito, `agregarIngreso` al éxito). Espejo de `useGastos`; mensajes "No se pudieron cargar los ingresos." / "No se pudo guardar el ingreso." / reusar "No hay una sesión activa...".
+- `src/composables/useDashboard.ts` — modificar — añadir función pura exportada `cargarBalancePorMoneda(gastos: Gasto[], ingresos: Ingreso[], mes: string): Record<Moneda, { ingresos: number; gastos: number; balance: number }>`: filtra ambas colecciones al `YYYY-MM` del mes, agrupa por moneda (PEN/USD por separado, NUNCA mezcla), resta ingresos − gastos. Extender `cargarDatosDashboard()` (o añadir un `filasIngresos` ref con su propio fetch a `ingresos`, misma ventana/patrón que `filas`) para traer ingresos del mes. NO tocar las funciones puras existentes.
 
-**Chunk C — Composable (independiente)**
-- `src/composables/useBandeja.ts` — **modificar** — añadir y exportar `cargarEstadoIngesta()`:
-  - `supabase.from('estado_ingesta').select('ultima_ejecucion_en').eq('usuario_id', <uid>).single()`. Para el `uid`: NO tocar `useAuth`/`stores/auth` (prohibido). Preferir la vía de menor acoplamiento — apoyarse en RLS (que ya restringe a la fila propia) usando el id de la sesión de `supabase.auth` directamente si es necesario para el `.eq`, o mantener el `.eq('usuario_id', ...)` como pide la HU. Documentar la decisión en comentario.
-  - Manejo de resultado: `error?.code === 'PGRST116'` (no rows) → devolver `null` SIN marcar error; `error` con otro code → devolver `null` sin romper la vista; ok → `data?.ultima_ejecucion_en ?? null`.
-  - Firma sugerida: `async function cargarEstadoIngesta(): Promise<string | null>`. NO ampliar `useGastosStore` para este dato de presentación puntual: la vista guarda el valor en un `ref` local. Añadirla al `return`.
-- `src/composables/__tests__/useBandeja.spec.ts` — **modificar** — nuevo `describe('cargarEstadoIngesta')`: (1) feliz → devuelve el timestamp; (2) no rows `error.code='PGRST116'` → `null` sin error; (3) error real (otro code) → `null` sin lanzar. Resolver el `single` con `mockResolvedValueOnce({data,error})`.
+### Vistas nuevas + router
+- `src/views/BancosView.vue` — crear — clon de `CategoriasView.vue` en versión lista simple (sin agrupación predefinida/personalizada, sin `DialogoConfirmacion`): cabecera "Bancos" + "+ Nuevo banco", `<ul>` de bancos, estado vacío claro, abre `ModalBanco`. `onMounted(cargarBancos)`.
+- `src/views/IngresosView.vue` — crear — clon estructural de `HistorialView.vue`: cabecera "Ingresos" + "+ Nuevo ingreso", `onMounted(cargarIngresos + cargarBancos)`, `<ul>` ordenada por fecha desc con banco/moneda/importe/concepto por fila, estado vacío claro cuando no hay ingresos, abre `ModalIngreso`. (HU-11.3; el orden lo garantiza el `.order` del composable.)
+- `src/router/index.ts` — modificar — añadir dos rutas hijas del App Shell: `{ path: 'ingresos', name: 'ingresos', component: () => import('@/views/IngresosView.vue') }` y `{ path: 'bancos', name: 'bancos', component: () => import('@/views/BancosView.vue') }`. Sin `meta` (heredan `requiereAuth` del padre).
 
-**Chunk D — UI (depende de C)**
-- `src/views/BandejaView.vue` — **modificar**:
-  - `onMounted`: además de las 2 llamadas actuales, `cargarEstadoIngesta()` y guardar el resultado en un `ref<string | null>` local (ej. `ultimaEjecucion`).
-  - `computed` para los 3 casos de HU-5.5 comparando con `Date.now()`:
-    - `null` → texto neutral "Aún no se ha ejecutado la revisión automática".
-    - dentro de 48h → "Última revisión: [fecha formateada]" neutral.
-    - > 48h (`Date.now() - Date(ultimaEjecucion) > 48*60*60*1000`) → mismo texto con indicador de advertencia.
-  - Formateo con `Intl.DateTimeFormat('es-PE', { dateStyle:'medium', timeStyle:'short' })` (o equivalente), consistente con el uso de `Intl` en el proyecto.
-  - Colocar el bloque cerca del `p.banner-bandeja`. Reusar el look de banner; para >48h aplicar `--color-advertencia` / `--color-advertencia-fondo` (ya en `estilos-base.css:19-20`) vía una clase modificadora scoped (ej. `.estado-ingesta--alerta`). Añadir una clase/marca estable para los tests (ej. `.estado-ingesta`).
-  - NO tocar la lógica de borradores/banner/estado-vacío existente.
-- `src/views/__tests__/BandejaView.spec.ts` — **modificar** — los 3 tests actuales deben seguir pasando: ahora `onMounted` hace una consulta extra a `estado_ingesta`; ajustar el `fromMock.mockImplementation` para contemplar `tabla === 'estado_ingesta'` devolviendo un builder cuyo `single` resuelva lo que cada caso necesite. Añadir 3 casos nuevos (usar `vi.setSystemTime`, precedente `DashboardView.spec.ts:64`): sin ejecución (single → PGRST116 / `data:null`) muestra "Aún no se ha ejecutado…"; ejecución < 48h muestra "Última revisión: …" sin clase de alerta; ejecución > 48h muestra el texto con la clase/indicador de advertencia.
+### Componentes nuevos
+- `src/components/ModalBanco.vue` — crear — clon de `ModalCategoria.vue` sin el emit `pedir-desactivar`. Envuelve `FormularioBanco`. Título "Nuevo banco".
+- `src/components/FormularioBanco.vue` — crear — clon reducido de `FormularioCategoria.vue`: solo campo nombre, valida no vacío ("Ingresa un nombre para el banco."), `crearBanco`, emite `guardado`/`cerrar`. Muestra `store.error` (incluye el mensaje traducido de duplicado). Sin modo edición/desactivar.
+- `src/components/ModalIngreso.vue` — crear — clon de `ModalGasto.vue`. Envuelve `FormularioIngreso`. Título "Nuevo ingreso".
+- `src/components/FormularioIngreso.vue` — crear — patrón `FormularioGasto` (alta): fecha (`type=date`), banco (selector desde `useIngresosStore().bancos`), moneda (`ToggleMoneda` + `<select>` oculto), importe (`inputmode=decimal`), concepto (texto). `validarFormulario()`: importe > 0 numérico, banco seleccionado, concepto no vacío, fecha presente, moneda presente — todo bloquea ANTES de llamar al backend (HU-11.2). Si no hay bancos: mensaje "No hay bancos; créalos primero." + botón deshabilitado (patrón "sin categorías").
+- `src/components/TarjetaBalanceMoneda.vue` — crear — presentacional puro (props `moneda`, `ingresos`, `gastos`, `balance`). Balance neto formateado con `useMoneda`, coloreado con `--color-primario` (≥0) / `--color-error` (<0), señal visual de signo, y un `router-link` "Ver ingresos" → `{ name: 'ingresos' }` (único acceso a Ingresos en móvil). NO modificar `TarjetaResumenMoneda.vue`.
+- `src/components/HojaAccionesFab.vue` — crear — bottom sheet anclado al fondo en móvil. Overlay con cierre por backdrop/Escape (patrón `ModalGasto`); llama `storeUi.abrirModal()`/`cerrarModal()` en mount/unmount. Dos botones ≥44px alto, ≥8px separación: "Registrar gasto" (emit `registrar-gasto`) y "Registrar ingreso" (emit `registrar-ingreso`). Emite `cerrar`.
+
+### Componentes/vistas a modificar (retrofit + wiring)
+- `src/components/FormularioGasto.vue` — modificar — añadir selector de **Banco** obligatorio (leído de `useIngresosStore().bancos`, cargado por `useBancos` desde la vista contenedora). `banco_id` inicial `props.gasto?.banco_id ?? ''`. Añadir a `validarFormulario()`: "Selecciona un banco." si vacío (bloquea envío). Incluir `banco_id` en el payload de `crearGasto` y de edición manual (para origen correo, ver decisión abierta abajo).
+- `src/components/FiltrosHistorial.vue` — modificar — añadir un `<select>` "Filtrar por banco" (prop `bancos: Banco[]`, prop `bancoId: string`, emit `update:bancoId`), mismo patrón que el select de categoría. Opción "Todos los bancos".
+- `src/views/HistorialView.vue` — modificar — `onMounted` también `cargarBancos()`; `bancoFiltro` ref; pasar `bancos`+`v-model:banco-id` a `FiltrosHistorial`; sumar `cumpleBanco` a `gastosFiltrados`; mostrar el nombre del banco en los metadatos de cada fila (helper `nombreBanco` resolviendo `banco_id` contra `useIngresosStore().bancos`).
+- `src/layouts/AppShellLayout.vue` — modificar —
+  - Desktop (sidebar): añadir botón "Registrar ingreso" debajo de "Registrar gasto" (abre `ModalIngreso` directo). Añadir ítems de navegación "Ingresos" y "Bancos" (ver decisión abajo).
+  - Móvil (bottom nav): el FAB "+" abre `HojaAccionesFab` en vez de `ModalGasto`. Las opciones de la hoja abren `ModalGasto`/`ModalIngreso`. NO añadir 6º ícono al bottom nav.
+  - Estado: `modalGastoAbierto`, `modalIngresoAbierto`, `hojaAbierta`. Renderizar `<ModalGasto>`, `<ModalIngreso>`, `<HojaAccionesFab>` con sus `v-if`.
+- `src/views/DashboardView.vue` — modificar — `onMounted` cargar también ingresos (vía `cargarDatosDashboard` extendido); computar `balancePorMoneda` con `cargarBalancePorMoneda`; añadir a `<section class="seccion-resumen">` dos `<TarjetaBalanceMoneda>` (PEN y USD) junto a las `TarjetaResumenMoneda`. Ajustar el grid (pasa a 4 tarjetas). NO tocar `TarjetaResumenMoneda.vue`.
+
+**Chunks paralelizables** (no se solapan):
+- Chunk A (catálogo bancos): `types/ingreso.ts`, `stores/ingresos.ts`, `useBancos.ts`, `BancosView.vue`, `ModalBanco.vue`, `FormularioBanco.vue`, ruta `bancos`.
+- Chunk B (ingresos, depende de A): `useIngresos.ts`, `IngresosView.vue`, `ModalIngreso.vue`, `FormularioIngreso.vue`, ruta `ingresos`.
+- Chunk C (dashboard balance, depende de A por tipos): `useDashboard.ts`, `TarjetaBalanceMoneda.vue`, `DashboardView.vue`.
+- Chunk D (retrofit gastos, depende de A): `types/gasto.ts`, `FormularioGasto.vue`, `FiltrosHistorial.vue`, `HistorialView.vue` + tests afectados.
+- Chunk E (shell/UX, depende de B por `ModalIngreso`): `HojaAccionesFab.vue`, `AppShellLayout.vue` + su test.
+
+### Decisión pedida — "Ingresos" en el sidebar de desktop
+**SÍ, añadir "Ingresos" como ítem de navegación en el sidebar de desktop.** Motivo: en desktop hay espacio (columna vertical, sin el límite de 5 del bottom nav), Ingresos es una sección de primer nivel equivalente a Historial, y dejar su único acceso desktop dentro de una tarjeta del Dashboard sería inconsistente con el resto de la navegación. Se recomienda añadir también "Bancos" al sidebar por consistencia con "Categorías" (catálogo secundario ya presente en el nav). Recomendación por defecto: incluir ambos ítems (Ingresos y Bancos) en el sidebar, ninguno en el bottom nav.
 
 ## Plan de pruebas
 
-- **Camino feliz (UI):** fila reciente (< 48h) → "Última revisión: [fecha/hora]" neutral; borradores intactos.
-- **Camino feliz (Edge):** POST con bearer correcto → 201 `{status:'registrado'}`; el upsert usa `usuario_id` fijo del servidor + `ultima_ejecucion_en` ≈ ahora.
-- **Camino feliz (composable):** `cargarEstadoIngesta` devuelve el `ultima_ejecucion_en` cuando hay fila.
-- **Borde/error:**
-  - Sin fila (`PGRST116`): composable → `null` sin error; UI muestra "Aún no se ha ejecutado la revisión automática".
-  - Ejecución > 48h: UI con indicador `--color-advertencia`.
-  - Edge: bearer inválido → 401; GET → 405; error de upsert → 500 con motivo genérico (sin filtrar detalle interno).
-  - Error real de Supabase en `cargarEstadoIngesta` (code != PGRST116) → `null` sin romper el render de la Bandeja.
-- **Criterios de aceptación HU-5.5 (3 escenarios como casos de `BandejaView.spec.ts`):**
-  1. Sin ejecución previa → mensaje neutral "Aún no se ha ejecutado la revisión automática".
-  2. Ejecución dentro de 48h → "Última revisión: [fecha]" neutral, sin advertencia.
-  3. Ejecución > 48h → mismo texto con indicador visual de advertencia (`--color-advertencia`).
+Framework: Vitest + @vue/test-utils + mock manual de Supabase (`crearConstructorConsulta`, `from.mockReturnValueOnce`). Mismos idiomas/estructura que los specs existentes.
 
-## Notas / fuera de alcance (no meter al build)
+### HU-11.1 — Catálogo de bancos (`useBancos.spec.ts` nuevo, `FormularioBanco.spec.ts` nuevo)
+- Camino feliz: `crearBanco('BCP')` inserta con `usuario_id` explícito y agrega el banco al store; aparece en la lista/selectores.
+- Borde/error (Gherkin duplicado): insert devuelve `error.code === '23505'` → `store.error === 'Ya existe un banco con ese nombre.'` (NO el error crudo de Postgres) y no se agrega al store.
+- Borde: `crearBanco('')` / solo espacios → `FormularioBanco` bloquea con "Ingresa un nombre para el banco.", no llama a Supabase.
 
-- `npm run build` al final; reportar el resultado exacto (lo hace el builder).
-- **Falta aplicar la migración 004 a producción** (manual, Gianmarco) — avisar al orquestador al terminar.
-- Actualización del prompt de la tarea programada `gastorin-ingesta-diaria` para llamar a la nueva Edge Function: FUERA de alcance (orquestador, herramienta de tareas programadas).
-- Sugerencia (fuera de alcance): si a futuro los secretos de Edge Functions deben divergir del service-role key, introducir un token dedicado por función y documentarlo en `.env.example`/config de Supabase. Hoy no aporta y añade superficie de configuración.
+### HU-11.2 — Registrar ingreso (`FormularioIngreso.spec.ts` nuevo, `useIngresos.spec.ts` nuevo)
+- Camino feliz: fecha + banco + moneda + importe>0 + concepto → `crearIngreso` inserta con `usuario_id` explícito; emite `guardado`.
+- Borde: importe = 0 → bloquea, no llama a Supabase, "Ingresa un importe válido mayor a 0." (Gherkin importe ≤ 0).
+- Borde: importe negativo → bloquea igual.
+- Borde: sin banco → "Selecciona un banco.", no llama a Supabase (Gherkin banco obligatorio).
+- Borde: sin concepto → "Ingresa un concepto.", no llama a Supabase (Gherkin concepto obligatorio).
+- Borde: sin sesión activa → `useIngresos.crearIngreso` no llama a Supabase, error "No hay una sesión activa...".
+
+### HU-11.3 — Historial de ingresos (`IngresosView.spec.ts` nuevo + cubierto por `useIngresos.spec.ts`)
+- Camino feliz: `cargarIngresos` usa `.order('fecha', { ascending: false })`; la vista lista banco/moneda/importe/concepto.
+- Borde: lista vacía → renderiza estado vacío claro (no error), sin filas.
+
+### HU-11.4 — Balance en Dashboard (`useDashboard.spec.ts` ampliar, `TarjetaBalanceMoneda.spec.ts` nuevo, `DashboardView.spec.ts` ampliar)
+- Camino feliz (función pura): gastos e ingresos mixtos PEN+USD en el mes → `cargarBalancePorMoneda` devuelve balance PEN y balance USD por separado (nunca sumados entre monedas). Ingresos > gastos → positivo.
+- Borde: gastos > ingresos → negativo; `TarjetaBalanceMoneda` aplica `--color-error` y señal de signo negativo. Balance ≥ 0 → `--color-primario`.
+- Borde: mes sin datos → balance 0 en ambas monedas (sin error).
+- Integración vista: `DashboardView` renderiza 2 `TarjetaBalanceMoneda` (PEN/USD) en `seccion-resumen`; el enlace "Ver ingresos" apunta a `{name:'ingresos'}`.
+
+### Retrofit Épica 2 — Banco obligatorio en gasto (ACTUALIZAR tests existentes + nuevos)
+Tests EXISTENTES que ROMPEN y hay que actualizar (afirman payload exacto, hoy sin `banco_id`):
+- `src/components/__tests__/FormularioGasto.spec.ts`:
+  - Todos los `montarFormulario` deben sembrar ≥1 banco en el store de ingresos y seleccionarlo en los caminos felices; si no, la nueva validación "Selecciona un banco." hará fallar flujos que hoy pasan.
+  - "camino feliz alta" (usa `objectContaining`, sobrevive) → añadir `banco_id` al assert.
+  - "editar gasto manual — camino feliz" (assert `update` **exacto** con `{monto,moneda,categoria_id,fecha,descripcion}`) → añadir `banco_id`.
+  - "editar gasto origen correo" (assert de que el payload NO incluye monto/fecha) → depende de la decisión abierta sobre banco editable en correo; ajustar assert en consecuencia.
+  - Fixtures `Gasto` (`gastoManual`, `gastoCorreo`) → añadir `banco_id` para compilar.
+- `src/composables/__tests__/useGastos.spec.ts`:
+  - "crearGasto camino feliz" (`insert` con `{...input, usuario_id, origen, estado}` exacto) → el `GastoInput` de prueba debe incluir `banco_id`.
+  - "editarGasto camino feliz" (`update).toHaveBeenCalledWith(input)` exacto) → añadir `banco_id` al `input`.
+  - `gastoBase` y demás fixtures `Gasto` → añadir `banco_id` (TS lo exigirá).
+- `src/views/__tests__/HistorialView.spec.ts`, `HistorialView.integracion.spec.ts`, `DashboardView.spec.ts`: fixtures `Gasto` necesitan `banco_id` para compilar; sus `fromMock.mockImplementation` de `onMounted` deben cubrir también `from('bancos')` (devolver `{data:[], error:null}`) para que `cargarBancos` no interfiera.
+- Tests NUEVOS Épica 2 (en `FormularioGasto.spec.ts`):
+  - Borde: gasto sin banco → "Selecciona un banco.", no llama a Supabase.
+  - Camino feliz: con banco seleccionado, el payload de `crearGasto` incluye `banco_id`.
+
+### Retrofit Épica 3 — Banco en historial (ACTUALIZAR + nuevos)
+- `src/components/__tests__/FiltrosHistorial.spec.ts` → añadir: el nuevo select de banco emite `update:bancoId`; opción "Todos los bancos" por defecto.
+- `HistorialView` (spec) → nuevo: filtro por banco reduce la lista (intersección con los filtros de moneda/categoría/mes existentes); cada fila muestra el nombre del banco.
+
+### Retrofit shell (ACTUALIZAR)
+- `src/layouts/__tests__/AppShellLayout.spec.ts`:
+  - El `montarShell` usa un memory router SIN rutas `ingresos`/`bancos`: añadirlas para que los nuevos `router-link` no emitan warnings/fallos.
+  - Test existente "al abrir el modal de registro (FAB) → `storeUi.modalAbierto=true` y bottom nav se oculta": con el nuevo comportamiento el FAB abre `HojaAccionesFab`. Si `HojaAccionesFab` llama `storeUi.abrirModal()` al montarse (contrato recomendado), el test sigue verde; si no, actualizar el test para reflejar que el FAB abre la hoja. Documentar la decisión.
+  - Nuevos: FAB móvil abre la hoja con 2 opciones; "Registrar ingreso" del sidebar desktop abre `ModalIngreso`.
+
+---
+
+## Decisión funcional abierta (confirmar con Producto — no bloquea el build)
+- **`banco_id` editable en gastos de origen correo.** Hoy el correo solo permite editar `categoria_id`/`descripcion`. Recomendación por defecto: permitir también editar el banco (igual que la categoría ya es editable), ya que la Edge Function que infiere banco se planea aparte y su inferencia puede necesitar corrección manual. Si Producto lo excluye, mantener el payload de correo limitado como hoy y ajustar el assert del test correspondiente.
+
+## Sugerencias fuera de alcance (NO incluir en este build)
+- Editar/eliminar ingresos y bancos (las HU 11.1–11.4 solo piden crear + listar). El store `ingresos.ts` puede dejarse sin `actualizar/quitar` hasta que exista una HU.
+- Extraer un helper compartido de "primer día del mes" (hoy duplicado entre `useDashboard` y `usePresupuestos`) — mismo criterio que builds previos.
+- Retrofit de la Edge Function `importar-borrador` para inferir banco: explícitamente fuera de alcance (se planeará por separado).
+- `npm run build` / suite completa al final: lo ejecuta y reporta el builder.

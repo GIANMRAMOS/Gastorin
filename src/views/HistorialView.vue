@@ -5,21 +5,26 @@ import DialogoConfirmacion from '@/components/DialogoConfirmacion.vue'
 import FiltrosHistorial from '@/components/FiltrosHistorial.vue'
 import { useGastos } from '@/composables/useGastos'
 import { useCategorias } from '@/composables/useCategorias'
+import { useBancos } from '@/composables/useBancos'
 import { useColorCategoria } from '@/composables/useColorCategoria'
 import { useGastosStore } from '@/stores/gastos'
+import { useIngresosStore } from '@/stores/ingresos'
 import { useMoneda } from '@/composables/useMoneda'
 import type { Gasto, Moneda } from '@/types/gasto'
 
 /**
  * Historial de gastos ampliado (Épica 3): lista con círculo de abreviatura,
- * filtros combinables por moneda/categoría/mes y estados vacíos distintos
- * según haya o no gastos en total. Cubre además el alta, edición y
- * eliminación de gastos (Épica 2).
+ * filtros combinables por moneda/categoría/banco/mes y estados vacíos
+ * distintos según haya o no gastos en total. Cubre además el alta, edición y
+ * eliminación de gastos (Épica 2), y el retrofit de banco obligatorio
+ * (migración `006`).
  */
 const { cargarGastos, eliminarGasto } = useGastos()
 const { cargarCategorias } = useCategorias()
+const { cargarBancos } = useBancos()
 const { colorCategoria: colorPorNombre } = useColorCategoria()
 const storeGastos = useGastosStore()
+const storeIngresos = useIngresosStore()
 const { formatearMonto } = useMoneda()
 
 const modalAbierto = ref(false)
@@ -29,12 +34,19 @@ const gastoAEliminar = ref<Gasto | null>(null)
 /** Filtros de UI del historial (estado local de la vista, no del store). */
 const monedaFiltro = ref<'todos' | Moneda>('todos')
 const categoriaFiltro = ref('')
+const bancoFiltro = ref('')
 const mesFiltro = ref('')
 
 onMounted(() => {
   cargarCategorias()
+  cargarBancos()
   cargarGastos()
 })
+
+/** Nombre del banco de un gasto (para mostrarlo en los metadatos de la fila). */
+function nombreBanco(bancoId: string): string {
+  return storeIngresos.bancos.find((banco) => banco.id === bancoId)?.nombre ?? 'Sin banco'
+}
 
 /** Busca la categoría de un gasto por su id (para nombre, color y abreviatura). */
 function categoriaDe(categoriaId: string) {
@@ -78,8 +90,9 @@ const gastosFiltrados = computed(() => {
   return storeGastos.gastos.filter((gasto) => {
     const cumpleMoneda = monedaFiltro.value === 'todos' || gasto.moneda === monedaFiltro.value
     const cumpleCategoria = !categoriaFiltro.value || gasto.categoria_id === categoriaFiltro.value
+    const cumpleBanco = !bancoFiltro.value || gasto.banco_id === bancoFiltro.value
     const cumpleMes = !mesFiltro.value || gasto.fecha.slice(0, 7) === mesFiltro.value
-    return cumpleMoneda && cumpleCategoria && cumpleMes
+    return cumpleMoneda && cumpleCategoria && cumpleBanco && cumpleMes
   })
 })
 
@@ -147,8 +160,10 @@ async function confirmarEliminacion() {
       v-if="!sinGastos"
       v-model:moneda="monedaFiltro"
       v-model:categoria-id="categoriaFiltro"
+      v-model:banco-id="bancoFiltro"
       v-model:mes="mesFiltro"
       :categorias="storeGastos.categorias"
+      :bancos="storeIngresos.bancos"
       :meses-disponibles="mesesDisponibles"
     />
 
@@ -160,7 +175,9 @@ async function confirmarEliminacion() {
 
         <div class="detalle-gasto">
           <p class="descripcion-gasto">{{ gasto.descripcion || nombreCategoria(gasto.categoria_id) }}</p>
-          <p class="metadatos-gasto">{{ nombreCategoria(gasto.categoria_id) }} · {{ gasto.fecha }}</p>
+          <p class="metadatos-gasto">
+            {{ nombreCategoria(gasto.categoria_id) }} · {{ nombreBanco(gasto.banco_id) }} · {{ gasto.fecha }}
+          </p>
         </div>
 
         <p class="monto-gasto">{{ montoFormateado(gasto) }}</p>

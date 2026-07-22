@@ -21,6 +21,7 @@ const gastoBase: Gasto = {
   id: 'g1',
   usuario_id: 'u1',
   categoria_id: 'c1',
+  banco_id: 'b1',
   monto: 10,
   moneda: 'PEN',
   fecha: '2026-07-01',
@@ -91,6 +92,7 @@ describe('useGastos', () => {
         monto: 45.5,
         moneda: 'USD',
         categoria_id: 'c1',
+        banco_id: 'b1',
         fecha: '2026-07-20',
         descripcion: null,
       }
@@ -121,6 +123,7 @@ describe('useGastos', () => {
         monto: 10,
         moneda: 'PEN',
         categoria_id: 'c1',
+        banco_id: 'b1',
         fecha: '2026-07-20',
         descripcion: null,
       })
@@ -149,6 +152,7 @@ describe('useGastos', () => {
         monto: 10,
         moneda: 'PEN',
         categoria_id: 'c1',
+        banco_id: 'b1',
         fecha: '2026-07-20',
         descripcion: null,
       })
@@ -169,6 +173,7 @@ describe('useGastos', () => {
         monto: 99,
         moneda: 'USD',
         categoria_id: 'c2',
+        banco_id: 'b2',
         fecha: '2026-07-21',
         descripcion: 'actualizado',
       }
@@ -182,6 +187,7 @@ describe('useGastos', () => {
         monto: 99,
         moneda: 'USD',
         categoria_id: 'c2',
+        banco_id: 'b2',
         fecha: '2026-07-21',
         descripcion: 'actualizado',
       }

@@ -60,6 +60,16 @@ const router = createRouter({
           name: 'presupuestos',
           component: () => import('@/views/PresupuestosView.vue'),
         },
+        {
+          path: 'ingresos',
+          name: 'ingresos',
+          component: () => import('@/views/IngresosView.vue'),
+        },
+        {
+          path: 'bancos',
+          name: 'bancos',
+          component: () => import('@/views/BancosView.vue'),
+        },
       ],
     },
   ],

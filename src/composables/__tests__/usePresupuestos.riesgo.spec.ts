@@ -35,6 +35,7 @@ describe('usePresupuestos — validación de riesgo (QA independiente)', () => {
         id: `g-${Math.random()}`,
         usuario_id: 'u1',
         categoria_id: 'comida',
+        banco_id: 'b1',
         monto: 0,
         moneda: 'PEN',
         fecha: '2026-07-15',

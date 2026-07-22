@@ -45,6 +45,7 @@ function gastoDe(categoriaId: string, fecha: string): Gasto {
     id: `g-${categoriaId}-${fecha}`,
     usuario_id: 'u1',
     categoria_id: categoriaId,
+    banco_id: 'b1',
     monto: 10,
     moneda: 'PEN',
     fecha,

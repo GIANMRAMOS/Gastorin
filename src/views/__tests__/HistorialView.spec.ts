@@ -13,6 +13,7 @@ const gastoFalso: Gasto = {
   id: 'g1',
   usuario_id: 'u1',
   categoria_id: 'c1',
+  banco_id: 'b1',
   monto: 20,
   moneda: 'PEN',
   fecha: '2026-07-01',
@@ -48,6 +49,8 @@ describe('HistorialView — eliminar gasto (HU-2.3)', () => {
       if (tabla === 'gastos') {
         ;(builder.order as Mock).mockResolvedValue({ data: [gastoFalso], error: null })
       } else {
+        // Cubre 'categorias' y 'bancos': listas vacías que no interfieren
+        // con el gasto sembrado a mano en el store.
         ;(builder.order as Mock).mockResolvedValue({ data: [], error: null })
       }
       return builder

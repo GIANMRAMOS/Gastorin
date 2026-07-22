@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { useGastosStore } from '@/stores/gastos'
 import { supabase } from '@/lib/supabaseClient'
 import type { Gasto, Moneda } from '@/types/gasto'
+import type { Ingreso } from '@/types/ingreso'
 
 /** Cantidad de meses (incluido el actual) que cubre la ventana de la tendencia mensual. */
 const MESES_VENTANA_TENDENCIA = 6
@@ -107,6 +108,39 @@ export function cargarTendenciaMensual(
 }
 
 /**
+ * Calcula, de forma pura, el balance neto (ingresos − gastos) de `mes`
+ * (prefijo `YYYY-MM`) por moneda (Épica 11, HU-11.4). Cada moneda se calcula
+ * por separado y NUNCA se mezclan entre sí (un balance en PEN no debe sumarse
+ * con uno en USD).
+ */
+export function cargarBalancePorMoneda(
+  gastos: Gasto[],
+  ingresos: Ingreso[],
+  mes: string,
+): Record<Moneda, { ingresos: number; gastos: number; balance: number }> {
+  const mesActual = mes.slice(0, 7)
+  const balancePorMoneda = {} as Record<Moneda, { ingresos: number; gastos: number; balance: number }>
+  const monedas: Moneda[] = ['PEN', 'USD']
+
+  for (const moneda of monedas) {
+    const totalIngresos = ingresos
+      .filter((ingreso) => ingreso.moneda === moneda && ingreso.fecha.slice(0, 7) === mesActual)
+      .reduce((total, ingreso) => total + ingreso.importe, 0)
+    const totalGastos = gastos
+      .filter((gasto) => gasto.moneda === moneda && gasto.fecha.slice(0, 7) === mesActual)
+      .reduce((total, gasto) => total + (gasto.monto ?? 0), 0)
+
+    balancePorMoneda[moneda] = {
+      ingresos: totalIngresos,
+      gastos: totalGastos,
+      balance: totalIngresos - totalGastos,
+    }
+  }
+
+  return balancePorMoneda
+}
+
+/**
  * Composable de dominio del Dashboard (Épica 7). A diferencia de
  * `usePresupuestos` (que reutiliza `store.gastos` ya cargado por
  * `useGastos.cargarGastos`), el Dashboard consulta `gastos` directamente y
@@ -121,11 +155,13 @@ export function useDashboard() {
 
   /** Filas crudas de la ventana de 6 meses, fuente de las tres agregaciones. */
   const filas = ref<Gasto[]>([])
+  /** Ingresos de la misma ventana de 6 meses, fuente del balance por moneda (HU-11.4). */
+  const filasIngresos = ref<Ingreso[]>([])
 
   /**
-   * Fetch único de los gastos confirmados desde el primer día del mes hace
-   * `MESES_VENTANA_TENDENCIA - 1` meses hasta hoy. Un array vacío NO es un
-   * error: significa que el usuario no tiene gastos confirmados en la ventana.
+   * Fetch de los gastos confirmados e ingresos desde el primer día del mes
+   * hace `MESES_VENTANA_TENDENCIA - 1` meses hasta hoy. Un array vacío NO es
+   * un error: significa que el usuario no tiene datos en la ventana.
    */
   async function cargarDatosDashboard() {
     store.establecerCargando(true)
@@ -142,6 +178,17 @@ export function useDashboard() {
         return false
       }
       filas.value = (data ?? []) as Gasto[]
+
+      const { data: dataIngresos, error: errorIngresos } = await supabase
+        .from('ingresos')
+        .select()
+        .gte('fecha', primerDiaDeMesRelativo(MESES_VENTANA_TENDENCIA - 1))
+        .order('fecha', { ascending: false })
+      if (errorIngresos) {
+        store.establecerError('No se pudieron cargar los datos del dashboard.')
+        return false
+      }
+      filasIngresos.value = (dataIngresos ?? []) as Ingreso[]
       return true
     } finally {
       store.establecerCargando(false)
@@ -150,6 +197,7 @@ export function useDashboard() {
 
   return {
     filas,
+    filasIngresos,
     cargarDatosDashboard,
   }
 }

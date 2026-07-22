@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import TarjetaResumenMoneda from '@/components/TarjetaResumenMoneda.vue'
+import TarjetaBalanceMoneda from '@/components/TarjetaBalanceMoneda.vue'
 import ListaGastoPorCategoria from '@/components/ListaGastoPorCategoria.vue'
 import GraficoTendenciaMensual from '@/components/GraficoTendenciaMensual.vue'
 import ToggleMoneda from '@/components/ToggleMoneda.vue'
@@ -9,6 +10,7 @@ import {
   cargarResumenPorMoneda,
   cargarGastoPorCategoria,
   cargarTendenciaMensual,
+  cargarBalancePorMoneda,
 } from '@/composables/useDashboard'
 import { useCategorias } from '@/composables/useCategorias'
 import { useGastosStore } from '@/stores/gastos'
@@ -16,11 +18,12 @@ import type { Moneda } from '@/types/gasto'
 
 /**
  * Dashboard (Épica 7): resumen del mes por moneda (HU-7.1, siempre ambas
- * monedas), gasto por categoría (HU-7.2) y tendencia mensual (HU-7.3), estas
- * dos últimas gobernadas por un único `ToggleMoneda` compartido. Es la nueva
- * home de la app (ruta raíz redirige aquí, ver `router/index.ts`).
+ * monedas), gasto por categoría (HU-7.2), tendencia mensual (HU-7.3) —estas
+ * dos últimas gobernadas por un único `ToggleMoneda` compartido— y balance
+ * neto por moneda (Épica 11, HU-11.4). Es la nueva home de la app (ruta raíz
+ * redirige aquí, ver `router/index.ts`).
  */
-const { filas, cargarDatosDashboard } = useDashboard()
+const { filas, filasIngresos, cargarDatosDashboard } = useDashboard()
 const { cargarCategorias } = useCategorias()
 const store = useGastosStore()
 
@@ -42,6 +45,11 @@ const mesActual = computed(() => {
 
 /** Resumen de gasto del mes actual por moneda (PEN y USD), independiente del toggle. */
 const resumenPorMoneda = computed(() => cargarResumenPorMoneda(filas.value, mesActual.value))
+
+/** Balance neto (ingresos − gastos) del mes actual por moneda (PEN y USD). */
+const balancePorMoneda = computed(() =>
+  cargarBalancePorMoneda(filas.value, filasIngresos.value, mesActual.value),
+)
 
 /** Gasto por categoría del mes actual en la moneda seleccionada, con nombre resuelto desde el store. */
 const gastoPorCategoria = computed(() => {
@@ -72,6 +80,18 @@ const tendenciaMensual = computed(() => cargarTendenciaMensual(filas.value, mone
         moneda="USD"
         :total="resumenPorMoneda.USD.total"
         :variacion-pct="resumenPorMoneda.USD.variacionPct"
+      />
+      <TarjetaBalanceMoneda
+        moneda="PEN"
+        :ingresos="balancePorMoneda.PEN.ingresos"
+        :gastos="balancePorMoneda.PEN.gastos"
+        :balance="balancePorMoneda.PEN.balance"
+      />
+      <TarjetaBalanceMoneda
+        moneda="USD"
+        :ingresos="balancePorMoneda.USD.ingresos"
+        :gastos="balancePorMoneda.USD.gastos"
+        :balance="balancePorMoneda.USD.balance"
       />
     </section>
 
@@ -105,7 +125,7 @@ const tendenciaMensual = computed(() => cargarTendenciaMensual(filas.value, mone
 
 .seccion-resumen {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, 1fr);
   gap: var(--espacio-3);
   margin-bottom: var(--espacio-6);
 }

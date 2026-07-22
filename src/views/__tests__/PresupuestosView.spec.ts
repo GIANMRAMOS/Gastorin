@@ -37,6 +37,7 @@ function gastoDe(monto: number): Gasto {
     id: 'g1',
     usuario_id: 'u1',
     categoria_id: 'c1',
+    banco_id: 'b1',
     monto,
     moneda: 'PEN',
     fecha: `${mesActual.slice(0, 7)}-10`,

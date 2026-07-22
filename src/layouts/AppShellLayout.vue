@@ -2,6 +2,8 @@
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ModalGasto from '@/components/ModalGasto.vue'
+import ModalIngreso from '@/components/ModalIngreso.vue'
+import HojaAccionesFab from '@/components/HojaAccionesFab.vue'
 import { useAuth } from '@/composables/useAuth'
 import { useVersion } from '@/composables/useVersion'
 import { useAuthStore } from '@/stores/auth'
@@ -10,9 +12,11 @@ import { useGastosStore } from '@/stores/gastos'
 
 /**
  * App Shell de las secciones privadas: sidebar en escritorio (≥900px) y
- * bottom nav en móvil (<900px), ambos con acceso a Historial y a "Registrar
- * gasto" (abre el modal existente, no es una ruta). Incluye el bloque de
- * cuenta con los datos del usuario autenticado y el botón de salir.
+ * bottom nav en móvil (<900px), ambos con acceso a Historial, Ingresos y
+ * Bancos. En escritorio, "Registrar gasto"/"Registrar ingreso" abren sus
+ * modales directamente; en móvil, el FAB "+" abre `HojaAccionesFab`, que a su
+ * vez abre el modal elegido (Épica 11, UX). Incluye el bloque de cuenta con
+ * los datos del usuario autenticado y el botón de salir.
  */
 const router = useRouter()
 const storeAuth = useAuthStore()
@@ -21,7 +25,9 @@ const storeGastos = useGastosStore()
 const { cerrarSesion } = useAuth()
 const { textoVersion, commitCompleto } = useVersion()
 
-const modalAbierto = ref(false)
+const modalGastoAbierto = ref(false)
+const modalIngresoAbierto = ref(false)
+const hojaAbierta = ref(false)
 /** Confirmación breve "Copiado" tras copiar el hash de commit al portapapeles. */
 const commitCopiado = ref(false)
 
@@ -37,19 +43,56 @@ const nombreUsuario = computed(() => emailUsuario.value.split('@')[0] || 'Usuari
 /** Inicial para el avatar circular del bloque de cuenta. */
 const inicialUsuario = computed(() => nombreUsuario.value.charAt(0).toUpperCase())
 
-/** Abre el modal de alta de gasto desde cualquier punto del shell. */
-function abrirModalRegistrar() {
-  modalAbierto.value = true
+/** Abre el modal de alta de gasto directo (sidebar de escritorio). */
+function abrirModalGasto() {
+  modalGastoAbierto.value = true
 }
 
 /** Cierra el modal de alta de gasto sin guardar. */
-function cerrarModal() {
-  modalAbierto.value = false
+function cerrarModalGasto() {
+  modalGastoAbierto.value = false
 }
 
 /** Tras guardar el gasto, cierra el modal (la lista se refresca sola vía store). */
-function manejarGuardado() {
-  modalAbierto.value = false
+function manejarGuardadoGasto() {
+  modalGastoAbierto.value = false
+}
+
+/** Abre el modal de alta de ingreso directo (sidebar de escritorio). */
+function abrirModalIngreso() {
+  modalIngresoAbierto.value = true
+}
+
+/** Cierra el modal de alta de ingreso sin guardar. */
+function cerrarModalIngreso() {
+  modalIngresoAbierto.value = false
+}
+
+/** Tras guardar el ingreso, cierra el modal (la lista se refresca sola vía store). */
+function manejarGuardadoIngreso() {
+  modalIngresoAbierto.value = false
+}
+
+/** Abre la hoja de acciones del FAB móvil. */
+function abrirHoja() {
+  hojaAbierta.value = true
+}
+
+/** Cierra la hoja de acciones sin abrir ningún modal. */
+function cerrarHoja() {
+  hojaAbierta.value = false
+}
+
+/** La hoja pidió registrar un gasto: la cierra y abre `ModalGasto`. */
+function elegirRegistrarGastoDesdeHoja() {
+  hojaAbierta.value = false
+  modalGastoAbierto.value = true
+}
+
+/** La hoja pidió registrar un ingreso: la cierra y abre `ModalIngreso`. */
+function elegirRegistrarIngresoDesdeHoja() {
+  hojaAbierta.value = false
+  modalIngresoAbierto.value = true
 }
 
 /** Cierra la sesión del usuario y redirige al login. */
@@ -118,11 +161,30 @@ async function copiarCommit() {
           </svg>
           Presupuestos
         </router-link>
-        <button type="button" class="item-nav item-nav-boton" @click="abrirModalRegistrar">
+        <router-link :to="{ name: 'ingresos' }" class="item-nav">
+          <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 19V5M5 12l7-7 7 7" />
+          </svg>
+          Ingresos
+        </router-link>
+        <router-link :to="{ name: 'bancos' }" class="item-nav">
+          <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="6" width="18" height="14" rx="2" />
+            <path d="M3 10h18" />
+          </svg>
+          Bancos
+        </router-link>
+        <button type="button" class="item-nav item-nav-boton" @click="abrirModalGasto">
           <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 5v14M5 12h14" />
           </svg>
           Registrar gasto
+        </button>
+        <button type="button" class="item-nav item-nav-boton" @click="abrirModalIngreso">
+          <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Registrar ingreso
         </button>
       </nav>
 
@@ -197,7 +259,7 @@ async function copiarCommit() {
         </svg>
         Presupuestos
       </router-link>
-      <button type="button" class="boton-fab" title="Registrar gasto" @click="abrirModalRegistrar">
+      <button type="button" class="boton-fab" title="Registrar" @click="abrirHoja">
         <svg class="icono-fab" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 5v14M5 12h14" />
         </svg>
@@ -210,7 +272,22 @@ async function copiarCommit() {
       </button>
     </nav>
 
-    <ModalGasto v-if="modalAbierto" @cerrar="cerrarModal" @guardado="manejarGuardado" />
+    <ModalGasto
+      v-if="modalGastoAbierto"
+      @cerrar="cerrarModalGasto"
+      @guardado="manejarGuardadoGasto"
+    />
+    <ModalIngreso
+      v-if="modalIngresoAbierto"
+      @cerrar="cerrarModalIngreso"
+      @guardado="manejarGuardadoIngreso"
+    />
+    <HojaAccionesFab
+      v-if="hojaAbierta"
+      @cerrar="cerrarHoja"
+      @registrar-gasto="elegirRegistrarGastoDesdeHoja"
+      @registrar-ingreso="elegirRegistrarIngresoDesdeHoja"
+    />
   </div>
 </template>
 

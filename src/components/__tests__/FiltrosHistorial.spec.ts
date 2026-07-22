@@ -2,15 +2,21 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import FiltrosHistorial from '@/components/FiltrosHistorial.vue'
 import type { Categoria } from '@/types/gasto'
+import type { Banco } from '@/types/ingreso'
 
 /**
  * Pruebas del presentacional de filtros del historial: chips de moneda
- * (uno activo a la vez) y dropdowns de categoría/mes. Se testea por emisión,
- * igual que `ToggleMoneda`.
+ * (uno activo a la vez) y dropdowns de categoría/banco/mes. Se testea por
+ * emisión, igual que `ToggleMoneda`.
  */
 const categoriasFalsas: Categoria[] = [
   { id: 'c1', usuario_id: 'u1', nombre: 'Comida', predefinida: true, activa: true, creado_en: '', abreviatura: 'C' },
   { id: 'c2', usuario_id: 'u1', nombre: 'Ocio', predefinida: true, activa: true, creado_en: '', abreviatura: 'O' },
+]
+
+const bancosFalsos: Banco[] = [
+  { id: 'b1', usuario_id: 'u1', nombre: 'BCP', created_at: '' },
+  { id: 'b2', usuario_id: 'u1', nombre: 'Interbank', created_at: '' },
 ]
 
 function montar(props: Partial<Record<string, unknown>> = {}) {
@@ -18,8 +24,10 @@ function montar(props: Partial<Record<string, unknown>> = {}) {
     props: {
       moneda: 'todos',
       categoriaId: '',
+      bancoId: '',
       mes: '',
       categorias: categoriasFalsas,
+      bancos: bancosFalsos,
       mesesDisponibles: ['2026-07', '2026-06'],
       ...props,
     },
@@ -79,5 +87,16 @@ describe('FiltrosHistorial', () => {
     await select.setValue('2026-06')
 
     expect(wrapper.emitted('update:mes')).toEqual([['2026-06']])
+  })
+
+  it('retrofit banco (Épica 3): "Todos los bancos" es la opción por defecto y elegir un banco emite update:bancoId', async () => {
+    const wrapper = montar()
+
+    const select = wrapper.find('select[aria-label="Filtrar por banco"]')
+    expect(select.find('option').text()).toBe('Todos los bancos')
+
+    await select.setValue('b2')
+
+    expect(wrapper.emitted('update:bancoId')).toEqual([['b2']])
   })
 })

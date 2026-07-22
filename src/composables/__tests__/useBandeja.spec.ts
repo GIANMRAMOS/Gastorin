@@ -17,6 +17,7 @@ const borradorBase: Gasto = {
   id: 'b1',
   usuario_id: 'u1',
   categoria_id: 'c1',
+  banco_id: 'banco-1',
   monto: 45.5,
   moneda: 'PEN',
   fecha: '2026-07-20',

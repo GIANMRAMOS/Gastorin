@@ -4,20 +4,37 @@ import {
   cargarResumenPorMoneda,
   cargarGastoPorCategoria,
   cargarTendenciaMensual,
+  cargarBalancePorMoneda,
   useDashboard,
 } from '@/composables/useDashboard'
 import { useGastosStore } from '@/stores/gastos'
 import { supabase } from '@/lib/supabaseClient'
 import { crearConstructorConsulta } from '@/lib/__mocks__/supabaseClient'
 import type { Gasto } from '@/types/gasto'
+import type { Ingreso } from '@/types/ingreso'
 
 const fromMock = supabase.from as unknown as Mock
+
+function ingresoDe(datos: Partial<Ingreso>): Ingreso {
+  return {
+    id: `i-${Math.random()}`,
+    usuario_id: 'u1',
+    banco_id: 'b1',
+    fecha: '2026-07-10',
+    moneda: 'PEN',
+    importe: 100,
+    concepto: 'Sueldo',
+    created_at: '',
+    ...datos,
+  }
+}
 
 function gastoDe(datos: Partial<Gasto>): Gasto {
   return {
     id: `g-${Math.random()}`,
     usuario_id: 'u1',
     categoria_id: 'c1',
+    banco_id: 'b1',
     monto: 100,
     moneda: 'PEN',
     fecha: '2026-07-10',
@@ -185,6 +202,64 @@ describe('useDashboard', () => {
       const tendencia = cargarTendenciaMensual(gastos, 'PEN')
 
       expect(tendencia.every((t) => t.total === 0)).toBe(true)
+    })
+  })
+
+  describe('cargarBalancePorMoneda (HU-11.4)', () => {
+    it('camino feliz: separa PEN/USD del mes y resta ingresos - gastos; ingresos > gastos da positivo', () => {
+      const gastos = [
+        gastoDe({ moneda: 'PEN', fecha: '2026-07-05', monto: 100 }),
+        gastoDe({ moneda: 'USD', fecha: '2026-07-05', monto: 10 }),
+      ]
+      const ingresos = [
+        ingresoDe({ moneda: 'PEN', fecha: '2026-07-10', importe: 500 }),
+        ingresoDe({ moneda: 'USD', fecha: '2026-07-10', importe: 20 }),
+      ]
+
+      const balance = cargarBalancePorMoneda(gastos, ingresos, '2026-07-01')
+
+      expect(balance.PEN).toEqual({ ingresos: 500, gastos: 100, balance: 400 })
+      expect(balance.USD).toEqual({ ingresos: 20, gastos: 10, balance: 10 })
+    })
+
+    it('borde clave — nunca mezcla monedas: un ingreso grande en USD no contamina el balance de PEN', () => {
+      const gastos = [gastoDe({ moneda: 'PEN', fecha: '2026-07-05', monto: 50 })]
+      const ingresos = [
+        ingresoDe({ moneda: 'PEN', fecha: '2026-07-05', importe: 30 }),
+        ingresoDe({ moneda: 'USD', fecha: '2026-07-05', importe: 99999 }),
+      ]
+
+      const balance = cargarBalancePorMoneda(gastos, ingresos, '2026-07-01')
+
+      expect(balance.PEN.ingresos).toBe(30)
+      expect(balance.PEN.balance).toBe(-20)
+      expect(balance.USD.gastos).toBe(0)
+      expect(balance.USD.balance).toBe(99999)
+    })
+
+    it('borde: gastos > ingresos devuelve un balance negativo', () => {
+      const gastos = [gastoDe({ moneda: 'PEN', fecha: '2026-07-05', monto: 400 })]
+      const ingresos = [ingresoDe({ moneda: 'PEN', fecha: '2026-07-05', importe: 100 })]
+
+      const balance = cargarBalancePorMoneda(gastos, ingresos, '2026-07-01')
+
+      expect(balance.PEN.balance).toBe(-300)
+    })
+
+    it('borde: mes sin datos en ninguna moneda da balance 0 en ambas, sin error', () => {
+      const balance = cargarBalancePorMoneda([], [], '2026-07-01')
+
+      expect(balance.PEN).toEqual({ ingresos: 0, gastos: 0, balance: 0 })
+      expect(balance.USD).toEqual({ ingresos: 0, gastos: 0, balance: 0 })
+    })
+
+    it('ignora gastos/ingresos de otros meses', () => {
+      const gastos = [gastoDe({ moneda: 'PEN', fecha: '2026-06-05', monto: 999 })]
+      const ingresos = [ingresoDe({ moneda: 'PEN', fecha: '2026-08-01', importe: 999 })]
+
+      const balance = cargarBalancePorMoneda(gastos, ingresos, '2026-07-01')
+
+      expect(balance.PEN).toEqual({ ingresos: 0, gastos: 0, balance: 0 })
     })
   })
 

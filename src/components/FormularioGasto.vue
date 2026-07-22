@@ -4,6 +4,7 @@ import ToggleMoneda from '@/components/ToggleMoneda.vue'
 import { useGastos } from '@/composables/useGastos'
 import { useColorCategoria } from '@/composables/useColorCategoria'
 import { useGastosStore } from '@/stores/gastos'
+import { useIngresosStore } from '@/stores/ingresos'
 import { useMoneda } from '@/composables/useMoneda'
 import type { Gasto, GastoInput, Moneda } from '@/types/gasto'
 
@@ -11,7 +12,8 @@ import type { Gasto, GastoInput, Moneda } from '@/types/gasto'
  * Formulario único compartido por alta y edición de gastos.
  * Si `gasto` viene definido, el formulario arranca en modo edición prellenado;
  * si no, arranca en modo alta. Para gastos con `origen === 'correo'`, `monto`
- * y `fecha` se muestran como referencia no editable (no se pueden modificar).
+ * y `fecha` se muestran como referencia no editable (no se pueden modificar);
+ * categoría, banco y descripción sí son editables.
  */
 const props = defineProps<{
   gasto?: Gasto | null
@@ -28,12 +30,14 @@ const esOrigenCorreo = computed(() => props.gasto?.origen === 'correo')
 const monto = ref(props.gasto ? String(props.gasto.monto) : '')
 const moneda = ref<Moneda | ''>(props.gasto?.moneda ?? '')
 const categoriaId = ref(props.gasto?.categoria_id ?? '')
+const bancoId = ref(props.gasto?.banco_id ?? '')
 const fecha = ref(props.gasto?.fecha ?? '')
 const descripcion = ref(props.gasto?.descripcion ?? '')
 
 const errorValidacion = ref<string | null>(null)
 
 const storeGastos = useGastosStore()
+const storeIngresos = useIngresosStore()
 const { crearGasto, editarGasto } = useGastos()
 const { colorCategoria } = useColorCategoria()
 const { formatearMonto } = useMoneda()
@@ -58,6 +62,14 @@ function elegirCategoria(id: string) {
 /** No hay categorías activas cargadas: la gestión de categorías es otra épica, hay que bloquear el guardado. */
 const sinCategorias = computed(() => categoriasActivas.value.length === 0)
 
+/**
+ * No hay bancos cargados: `banco_id` es obligatorio (migración `006`), hay
+ * que bloquear el guardado igual que con categorías. La carga de bancos la
+ * hace la vista contenedora vía `useBancos` (catálogo compartido, vive en
+ * `stores/ingresos.ts`).
+ */
+const sinBancos = computed(() => storeIngresos.bancos.length === 0)
+
 /** Monto formateado de solo lectura para gastos de origen correo (no editable). */
 const montoReferencia = computed(() => {
   if (!props.gasto) return ''
@@ -77,6 +89,10 @@ function validarFormulario(): boolean {
   }
   if (!categoriaId.value) {
     errorValidacion.value = 'Selecciona una categoría.'
+    return false
+  }
+  if (!bancoId.value) {
+    errorValidacion.value = 'Selecciona un banco.'
     return false
   }
   if (!esOrigenCorreo.value) {
@@ -108,9 +124,12 @@ async function manejarEnvio() {
   let exito = false
   if (esEdicion.value && props.gasto) {
     if (esOrigenCorreo.value) {
-      // Gastos de correo: solo categoría y descripción son editables.
+      // Gastos de correo: monto y fecha no son editables; categoría, banco y
+      // descripción sí (el banco se deja editable para poder corregir la
+      // inferencia automática, igual que la categoría).
       exito = await editarGasto(props.gasto.id, {
         categoria_id: categoriaId.value,
+        banco_id: bancoId.value,
         descripcion: descripcion.value.trim() || null,
       })
     } else {
@@ -118,6 +137,7 @@ async function manejarEnvio() {
         monto: Number(monto.value),
         moneda: moneda.value as Moneda,
         categoria_id: categoriaId.value,
+        banco_id: bancoId.value,
         fecha: fecha.value,
         descripcion: descripcion.value.trim() || null,
       })
@@ -127,6 +147,7 @@ async function manejarEnvio() {
       monto: Number(monto.value),
       moneda: moneda.value as Moneda,
       categoria_id: categoriaId.value,
+      banco_id: bancoId.value,
       fecha: fecha.value,
       descripcion: descripcion.value.trim() || null,
     }
@@ -213,6 +234,17 @@ async function manejarEnvio() {
     </div>
 
     <div class="grupo-campo">
+      <label for="banco">Banco</label>
+      <p v-if="sinBancos" role="alert" class="mensaje-error">No hay bancos; créalos primero.</p>
+      <select id="banco" v-model="bancoId" class="entrada" :disabled="sinBancos">
+        <option value="" disabled>Selecciona un banco</option>
+        <option v-for="banco in storeIngresos.bancos" :key="banco.id" :value="banco.id">
+          {{ banco.nombre }}
+        </option>
+      </select>
+    </div>
+
+    <div class="grupo-campo">
       <label for="fecha">Fecha</label>
       <input
         id="fecha"
@@ -233,7 +265,7 @@ async function manejarEnvio() {
 
     <button
       type="submit"
-      :disabled="storeGastos.cargando || sinCategorias"
+      :disabled="storeGastos.cargando || sinCategorias || sinBancos"
       class="boton-primario"
       :class="{ cargando: storeGastos.cargando }"
     >

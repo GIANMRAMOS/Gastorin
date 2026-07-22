@@ -17,6 +17,7 @@ const gastoFalso: Gasto = {
   id: 'g1',
   usuario_id: 'u1',
   categoria_id: 'c1',
+  banco_id: 'b1',
   monto: 10,
   moneda: 'PEN',
   fecha: '2026-07-01',

@@ -44,6 +44,12 @@ export interface Gasto {
   id: string
   usuario_id: string
   categoria_id: string
+  /**
+   * Banco/billetera de origen del gasto (migración `006`, obligatorio: ya
+   * viene con backfill en producción). Catálogo compartido con el dominio
+   * de Ingresos, ver `types/ingreso.ts` y `stores/ingresos.ts`.
+   */
+  banco_id: string
   monto: number | null
   moneda: Moneda | null
   fecha: string
@@ -61,6 +67,7 @@ export interface GastoInput {
   monto: number
   moneda: Moneda
   categoria_id: string
+  banco_id: string
   fecha: string
   descripcion: string | null
 }

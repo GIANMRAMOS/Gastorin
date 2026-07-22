@@ -1,23 +1,27 @@
 <script setup lang="ts">
 import type { Categoria } from '@/types/gasto'
+import type { Banco } from '@/types/ingreso'
 
 /**
  * Barra de filtros del historial: chips de moneda (Todos/Soles/Dólares) +
- * dropdowns de categoría y mes. Componente presentacional puro (patrón
+ * dropdowns de categoría, banco y mes. Componente presentacional puro (patrón
  * `v-model`/emit, como `ToggleMoneda`): no calcula el filtrado, solo emite
  * la selección para que la vista la aplique sobre `store.gastos`.
  */
 const props = defineProps<{
   moneda: 'todos' | 'PEN' | 'USD'
   categoriaId: string
+  bancoId: string
   mes: string
   categorias: Categoria[]
+  bancos: Banco[]
   mesesDisponibles: string[]
 }>()
 
 const emit = defineEmits<{
   'update:moneda': ['todos' | 'PEN' | 'USD']
   'update:categoriaId': [string]
+  'update:bancoId': [string]
   'update:mes': [string]
 }>()
 
@@ -59,6 +63,18 @@ function elegirMoneda(valor: 'todos' | 'PEN' | 'USD') {
         <option value="">Todas las categorías</option>
         <option v-for="categoria in props.categorias" :key="categoria.id" :value="categoria.id">
           {{ categoria.nombre }}
+        </option>
+      </select>
+
+      <select
+        class="select-filtro"
+        aria-label="Filtrar por banco"
+        :value="props.bancoId"
+        @change="emit('update:bancoId', ($event.target as HTMLSelectElement).value)"
+      >
+        <option value="">Todos los bancos</option>
+        <option v-for="banco in props.bancos" :key="banco.id" :value="banco.id">
+          {{ banco.nombre }}
         </option>
       </select>
 

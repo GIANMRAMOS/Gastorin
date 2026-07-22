@@ -5,6 +5,7 @@ dist-ssr
 .env.local
 .env*.local
 coverage
+.DS_Store
 
 # editores/IDE
 .vscode/*

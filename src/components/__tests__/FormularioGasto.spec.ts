@@ -3,10 +3,12 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import FormularioGasto from '@/components/FormularioGasto.vue'
 import { useGastosStore } from '@/stores/gastos'
+import { useIngresosStore } from '@/stores/ingresos'
 import { useAuthStore } from '@/stores/auth'
 import { supabase } from '@/lib/supabaseClient'
 import { crearConstructorConsulta } from '@/lib/__mocks__/supabaseClient'
 import type { Categoria, Gasto } from '@/types/gasto'
+import type { Banco } from '@/types/ingreso'
 
 const fromMock = supabase.from as unknown as Mock
 
@@ -20,10 +22,18 @@ const categoriaFalsa: Categoria = {
   abreviatura: 'C',
 }
 
+const bancoFalso: Banco = {
+  id: 'b1',
+  usuario_id: 'u1',
+  nombre: 'BCP',
+  created_at: '',
+}
+
 const gastoManual: Gasto = {
   id: 'g1',
   usuario_id: 'u1',
   categoria_id: 'c1',
+  banco_id: 'b1',
   monto: 20,
   moneda: 'PEN',
   fecha: '2026-07-01',
@@ -61,6 +71,7 @@ describe('FormularioGasto', () => {
     it('el <select id="moneda"> sigue siendo controlable vía .setValue() tras extraer ToggleMoneda', async () => {
       const store = useGastosStore()
       store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
 
       const wrapper = montarFormulario(null)
       const select = wrapper.find('#moneda')
@@ -76,9 +87,10 @@ describe('FormularioGasto', () => {
   })
 
   describe('HU-2.1 — alta de gasto manual', () => {
-    it('camino feliz: monto válido + moneda + categoría + fecha guarda con origen manual y estado confirmado', async () => {
+    it('camino feliz: monto válido + moneda + categoría + banco + fecha guarda con origen manual y estado confirmado', async () => {
       const store = useGastosStore()
       store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
 
       const builder = crearConstructorConsulta()
       fromMock.mockReturnValueOnce(builder)
@@ -89,6 +101,7 @@ describe('FormularioGasto', () => {
       await wrapper.find('#monto').setValue('45.50')
       await wrapper.find('#moneda').setValue('PEN')
       await wrapper.find('#categoria').setValue('c1')
+      await wrapper.find('#banco').setValue('b1')
       await wrapper.find('#fecha').setValue('2026-07-20')
       await wrapper.find('form').trigger('submit.prevent')
       await new Promise((r) => setTimeout(r, 0))
@@ -98,6 +111,7 @@ describe('FormularioGasto', () => {
           monto: 45.5,
           moneda: 'PEN',
           categoria_id: 'c1',
+          banco_id: 'b1',
           fecha: '2026-07-20',
           origen: 'manual',
           estado: 'confirmado',
@@ -109,11 +123,13 @@ describe('FormularioGasto', () => {
     it('borde: monto = 0 bloquea el envío, no llama a Supabase', async () => {
       const store = useGastosStore()
       store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
 
       const wrapper = montarFormulario(null)
       await wrapper.find('#monto').setValue('0')
       await wrapper.find('#moneda').setValue('PEN')
       await wrapper.find('#categoria').setValue('c1')
+      await wrapper.find('#banco').setValue('b1')
       await wrapper.find('#fecha').setValue('2026-07-20')
       await wrapper.find('form').trigger('submit.prevent')
       await new Promise((r) => setTimeout(r, 0))
@@ -126,11 +142,13 @@ describe('FormularioGasto', () => {
     it('borde: monto negativo bloquea el envío', async () => {
       const store = useGastosStore()
       store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
 
       const wrapper = montarFormulario(null)
       await wrapper.find('#monto').setValue('-5')
       await wrapper.find('#moneda').setValue('PEN')
       await wrapper.find('#categoria').setValue('c1')
+      await wrapper.find('#banco').setValue('b1')
       await wrapper.find('#fecha').setValue('2026-07-20')
       await wrapper.find('form').trigger('submit.prevent')
       await new Promise((r) => setTimeout(r, 0))
@@ -142,11 +160,13 @@ describe('FormularioGasto', () => {
     it('borde: monto no numérico bloquea el envío', async () => {
       const store = useGastosStore()
       store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
 
       const wrapper = montarFormulario(null)
       await wrapper.find('#monto').setValue('abc')
       await wrapper.find('#moneda').setValue('PEN')
       await wrapper.find('#categoria').setValue('c1')
+      await wrapper.find('#banco').setValue('b1')
       await wrapper.find('#fecha').setValue('2026-07-20')
       await wrapper.find('form').trigger('submit.prevent')
       await new Promise((r) => setTimeout(r, 0))
@@ -158,10 +178,12 @@ describe('FormularioGasto', () => {
     it('borde: falta moneda bloquea el envío con mensaje de campo obligatorio', async () => {
       const store = useGastosStore()
       store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
 
       const wrapper = montarFormulario(null)
       await wrapper.find('#monto').setValue('45.50')
       await wrapper.find('#categoria').setValue('c1')
+      await wrapper.find('#banco').setValue('b1')
       await wrapper.find('#fecha').setValue('2026-07-20')
       await wrapper.find('form').trigger('submit.prevent')
       await new Promise((r) => setTimeout(r, 0))
@@ -173,10 +195,12 @@ describe('FormularioGasto', () => {
     it('borde: falta categoría bloquea el envío con mensaje de campo obligatorio', async () => {
       const store = useGastosStore()
       store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
 
       const wrapper = montarFormulario(null)
       await wrapper.find('#monto').setValue('45.50')
       await wrapper.find('#moneda').setValue('PEN')
+      await wrapper.find('#banco').setValue('b1')
       await wrapper.find('#fecha').setValue('2026-07-20')
       await wrapper.find('form').trigger('submit.prevent')
       await new Promise((r) => setTimeout(r, 0))
@@ -185,9 +209,27 @@ describe('FormularioGasto', () => {
       expect(wrapper.find('[role="alert"]').text()).toBe('Selecciona una categoría.')
     })
 
+    it('borde: falta banco bloquea el envío con mensaje de campo obligatorio (retrofit Épica 2)', async () => {
+      const store = useGastosStore()
+      store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
+
+      const wrapper = montarFormulario(null)
+      await wrapper.find('#monto').setValue('45.50')
+      await wrapper.find('#moneda').setValue('PEN')
+      await wrapper.find('#categoria').setValue('c1')
+      await wrapper.find('#fecha').setValue('2026-07-20')
+      await wrapper.find('form').trigger('submit.prevent')
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(fromMock).not.toHaveBeenCalled()
+      expect(wrapper.find('[role="alert"]').text()).toBe('Selecciona un banco.')
+    })
+
     it('borde: sin categorías cargadas muestra mensaje y deshabilita el botón guardar', async () => {
       const store = useGastosStore()
       store.establecerCategorias([])
+      useIngresosStore().establecerBancos([bancoFalso])
 
       const wrapper = montarFormulario(null)
 
@@ -203,6 +245,7 @@ describe('FormularioGasto', () => {
       const store = useGastosStore()
       const categoriaInactiva: Categoria = { ...categoriaFalsa, id: 'c2', nombre: 'Ocio', activa: false }
       store.establecerCategorias([categoriaFalsa, categoriaInactiva])
+      useIngresosStore().establecerBancos([bancoFalso])
 
       const wrapper = montarFormulario(null)
 
@@ -217,6 +260,7 @@ describe('FormularioGasto', () => {
     it('camino feliz: gasto manual — todos los campos aparecen prellenados y editables; al guardar se actualiza', async () => {
       const store = useGastosStore()
       store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
 
       const wrapper = montarFormulario(gastoManual)
 
@@ -224,6 +268,7 @@ describe('FormularioGasto', () => {
       expect((wrapper.find('#monto').element as HTMLInputElement).value).toBe('20')
       expect((wrapper.find('#moneda').element as HTMLSelectElement).value).toBe('PEN')
       expect((wrapper.find('#categoria').element as HTMLSelectElement).value).toBe('c1')
+      expect((wrapper.find('#banco').element as HTMLSelectElement).value).toBe('b1')
       expect((wrapper.find('#fecha').element as HTMLInputElement).value).toBe('2026-07-01')
       // Editable (no disabled)
       expect(wrapper.find('#monto').attributes('disabled')).toBeUndefined()
@@ -242,6 +287,7 @@ describe('FormularioGasto', () => {
         monto: 30,
         moneda: 'PEN',
         categoria_id: 'c1',
+        banco_id: 'b1',
         fecha: '2026-07-01',
         descripcion: 'algo',
       })
@@ -249,10 +295,12 @@ describe('FormularioGasto', () => {
       expect(wrapper.emitted('guardado')).toHaveLength(1)
     })
 
-    it('camino feliz: gasto origen correo — monto y fecha son referencia no editable; solo categoría/descripción editables; el payload no incluye monto ni fecha', async () => {
+    it('camino feliz: gasto origen correo — monto y fecha son referencia no editable; categoría/banco/descripción editables; el payload no incluye monto ni fecha', async () => {
       const store = useGastosStore()
       const otraCategoria: Categoria = { ...categoriaFalsa, id: 'c2', nombre: 'Transporte' }
       store.establecerCategorias([categoriaFalsa, otraCategoria])
+      const otroBanco: Banco = { ...bancoFalso, id: 'b2', nombre: 'Interbank' }
+      useIngresosStore().establecerBancos([bancoFalso, otroBanco])
 
       const wrapper = montarFormulario(gastoCorreo)
 
@@ -261,22 +309,25 @@ describe('FormularioGasto', () => {
       expect(inputMonto.attributes('disabled')).toBeDefined()
       expect((inputMonto.element as HTMLInputElement).value).toContain('35.90')
       expect(wrapper.find('#fecha').attributes('disabled')).toBeDefined()
-      // Categoría y descripción sí editables
+      // Categoría, banco y descripción sí editables
       expect(wrapper.find('#categoria').attributes('disabled')).toBeUndefined()
+      expect(wrapper.find('#banco').attributes('disabled')).toBeUndefined()
       expect(wrapper.find('#descripcion').attributes('disabled')).toBeUndefined()
 
       const builder = crearConstructorConsulta()
       fromMock.mockReturnValueOnce(builder)
-      const gastoActualizado: Gasto = { ...gastoCorreo, categoria_id: 'c2', descripcion: 'nueva desc' }
+      const gastoActualizado: Gasto = { ...gastoCorreo, categoria_id: 'c2', banco_id: 'b2', descripcion: 'nueva desc' }
       ;(builder.single as Mock).mockResolvedValueOnce({ data: gastoActualizado, error: null })
 
       await wrapper.find('#categoria').setValue('c2')
+      await wrapper.find('#banco').setValue('b2')
       await wrapper.find('#descripcion').setValue('nueva desc')
       await wrapper.find('form').trigger('submit.prevent')
       await new Promise((r) => setTimeout(r, 0))
 
       expect(builder.update).toHaveBeenCalledWith({
         categoria_id: 'c2',
+        banco_id: 'b2',
         descripcion: 'nueva desc',
       })
       expect(builder.update).not.toHaveBeenCalledWith(
@@ -291,6 +342,7 @@ describe('FormularioGasto', () => {
     it('borde: en edición manual, las validaciones del alta (monto > 0, moneda y categoría) también aplican', async () => {
       const store = useGastosStore()
       store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
 
       const wrapper = montarFormulario(gastoManual)
       await wrapper.find('#monto').setValue('0')

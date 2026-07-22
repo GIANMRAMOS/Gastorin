@@ -6,6 +6,7 @@ import { useGastosStore } from '@/stores/gastos'
 import { supabase } from '@/lib/supabaseClient'
 import { crearConstructorConsulta } from '@/lib/__mocks__/supabaseClient'
 import type { Categoria, Gasto } from '@/types/gasto'
+import type { Banco } from '@/types/ingreso'
 
 const fromMock = supabase.from as unknown as Mock
 
@@ -40,11 +41,17 @@ const categoriasCrudasFalsas = [
   },
 ] as unknown as Categoria[]
 
+// Banco único para todos los gastos falsos: no es objeto de estas pruebas de
+// filtros/estado vacío (eso lo cubre `FiltrosHistorial.spec.ts` y el filtro
+// de banco se ejercita aparte).
+const bancoFalso: Banco = { id: 'b1', usuario_id: 'u1', nombre: 'BCP', created_at: '' }
+
 const gastosFalsos: Gasto[] = [
   {
     id: 'g1',
     usuario_id: 'u1',
     categoria_id: 'ocio',
+    banco_id: 'b1',
     monto: 25.5,
     moneda: 'PEN',
     fecha: '2026-07-10',
@@ -60,6 +67,7 @@ const gastosFalsos: Gasto[] = [
     id: 'g2',
     usuario_id: 'u1',
     categoria_id: 'otro',
+    banco_id: 'b1',
     monto: 12,
     moneda: 'USD',
     fecha: '2026-07-15',
@@ -75,6 +83,7 @@ const gastosFalsos: Gasto[] = [
     id: 'g3',
     usuario_id: 'u1',
     categoria_id: 'transporte',
+    banco_id: 'b1',
     monto: 8,
     moneda: 'PEN',
     fecha: '2026-06-01',
@@ -93,12 +102,16 @@ function flushPromises() {
 }
 
 /** Configura `supabase.from()` para devolver los fixtures dados en `onMounted`. */
-function mockearCargaInicial(opciones: { categorias?: unknown[]; gastos?: Gasto[] } = {}) {
-  const { categorias = categoriasCrudasFalsas, gastos = gastosFalsos } = opciones
+function mockearCargaInicial(
+  opciones: { categorias?: unknown[]; bancos?: Banco[]; gastos?: Gasto[] } = {},
+) {
+  const { categorias = categoriasCrudasFalsas, bancos = [bancoFalso], gastos = gastosFalsos } = opciones
   fromMock.mockImplementation((tabla: string) => {
     const builder = crearConstructorConsulta()
     if (tabla === 'gastos') {
       ;(builder.order as Mock).mockResolvedValue({ data: gastos, error: null })
+    } else if (tabla === 'bancos') {
+      ;(builder.order as Mock).mockResolvedValue({ data: bancos, error: null })
     } else {
       ;(builder.order as Mock).mockResolvedValue({ data: categorias, error: null })
     }
@@ -125,7 +138,7 @@ describe('HistorialView — fila del historial (HU-3.1)', () => {
     expect(circulo.text()).toBe('OC') // 2 caracteres por colisión con "Otro"
     expect(circulo.attributes('style')).toContain('var(--color-categoria-ocio)')
     expect(filaCine.find('.descripcion-gasto').text()).toBe('Cine')
-    expect(filaCine.find('.metadatos-gasto').text()).toBe('Ocio · 2026-07-10')
+    expect(filaCine.find('.metadatos-gasto').text()).toBe('Ocio · BCP · 2026-07-10')
     expect(filaCine.find('.monto-gasto').text()).toContain('25.50')
     expect(filaCine.find('.monto-gasto').text()).toContain('S/')
     expect(filaCine.find('.indicador-editar').text()).toBe('Editar ›')
@@ -218,6 +231,7 @@ describe('HistorialView — cruce con Épica 4 (HU-4.3): categoría desactivada 
       id: 'g-hist',
       usuario_id: 'u1',
       categoria_id: 'transporte',
+      banco_id: 'b1',
       monto: 15,
       moneda: 'PEN',
       fecha: '2026-05-01',
@@ -246,7 +260,7 @@ describe('HistorialView — cruce con Épica 4 (HU-4.3): categoría desactivada 
     const fila = wrapper.findAll('.fila-gasto').find((f) => f.text().includes('Taxi viejo'))!
     expect(fila).toBeDefined()
     // Nombre real de la categoría desactivada (no "Sin categoría").
-    expect(fila.find('.metadatos-gasto').text()).toBe('Transporte · 2026-05-01')
+    expect(fila.find('.metadatos-gasto').text()).toBe('Transporte · BCP · 2026-05-01')
     // Color real (mapa curado de "transporte"), no el color de respaldo "otros".
     expect(fila.find('.circulo-categoria').attributes('style')).toContain(
       'var(--color-categoria-transporte)',

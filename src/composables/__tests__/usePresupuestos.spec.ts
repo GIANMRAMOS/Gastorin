@@ -28,6 +28,7 @@ function gastoDe(datos: Partial<Gasto>): Gasto {
     id: 'g1',
     usuario_id: 'u1',
     categoria_id: 'c1',
+    banco_id: 'b1',
     monto: 100,
     moneda: 'PEN',
     fecha: '2026-07-10',
