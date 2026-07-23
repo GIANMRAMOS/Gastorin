@@ -98,10 +98,33 @@ Deno.serve(async (req: Request) => {
     categoriaId = categoriaOtros.id as string
   }
 
-  // --- Resuelve el banco: el del payload, o "No especificado" del usuario fijo. ---
-  // Mínimo para desbloquear la ingesta tras la migración 006 (gastos.banco_id NOT NULL).
-  // La inferencia de banco desde el correo (Épica 5) queda fuera de alcance.
+  // --- Resuelve el banco. Prioridad de mayor a menor:
+  //   1) payload.banco_id explícito: se usa tal cual (se confía; el FK de la BD
+  //      lo rechaza si es inválido). Gana sobre banco_nombre si ambos vienen.
+  //   2) payload.banco_nombre: busca el banco del usuario fijo por nombre,
+  //      case-insensitive (la tabla tiene índice único sobre lower(nombre)).
+  //   3) Respaldo "No especificado" del usuario fijo: cuando no vino banco_id, y
+  //      además no vino banco_nombre O el nombre pedido no existe en el catálogo.
+  // El fallback a "No especificado" es SILENCIOSO a propósito: un proceso
+  // automático de ingesta no debe fallar toda la importación de un correo solo
+  // porque el usuario aún no creó ese banco en su catálogo.
   let bancoId = typeof payload.banco_id === 'string' ? payload.banco_id : null
+
+  if (!bancoId && typeof payload.banco_nombre === 'string' && payload.banco_nombre.trim() !== '') {
+    // `.ilike` con el nombre literal (sin comodines añadidos) => comparación
+    // exacta case-insensitive, coherente con el índice único sobre lower(nombre).
+    // `.maybeSingle()` para que "no encontrado" devuelva data=null SIN error.
+    const { data: bancoPorNombre } = await supabase
+      .from('bancos')
+      .select('id')
+      .eq('usuario_id', usuarioId)
+      .ilike('nombre', payload.banco_nombre)
+      .maybeSingle()
+    if (bancoPorNombre) {
+      bancoId = bancoPorNombre.id as string
+    }
+  }
+
   if (!bancoId) {
     const { data: bancoRespaldo, error: errorBanco } = await supabase
       .from('bancos')

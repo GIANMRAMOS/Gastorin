@@ -1,38 +1,91 @@
-# Micro-plan — Fix: resolver `banco_id` en importar-borrador (usar banco de respaldo "No especificado")
+# Micro-plan — Resolver banco por nombre (`banco_nombre`) en `importar-borrador`
 
 ## Patrón arquitectónico detectado
-La Edge Function `supabase/functions/importar-borrador/index.ts` sigue un patrón muy explícito y ya establecido para las FK obligatorias del `insert` en `gastos`:
+Edge Function de Supabase (Deno) con separación clara en dos archivos:
 
-1. Tomar el id del payload si viene y es `string`; si no, resolver un valor de respaldo por usuario fijo consultando su propia tabla con `.select('id').eq('usuario_id', usuarioId).eq('nombre', <NOMBRE>).single()`.
-2. Si la consulta de respaldo falla o no devuelve fila, cortar con `respuestaJson({ status: 'error', motivo: '...' }, 400)` (motivo legible, no 500).
-3. Usar el id resuelto en el objeto del `insert`.
+- `index.ts`: handler HTTP (auth por bearer, parseo, orquestación de queries a
+  Supabase, inserción). Contiene la lógica que toca red/DB.
+- `logica.ts`: helpers **puros** (`validarPayload`, `resolverEstado`) y el tipo
+  `PayloadImportarBorrador`. No importa Deno ni supabase-js — testeable con Vitest sin runtime.
+- `__tests__/index.spec.ts`: mockea `createClient` y `Deno`, captura el handler y
+  ejercita el flujo completo con builders de query encadenados (`select().eq().eq().single()`).
 
-Esto ya existe para `categoria_id` (líneas 81-97) usando la categoría `'Otros'` del usuario fijo, con la constante `NOMBRE_CATEGORIA_OTROS`. La resolución de `banco_id` debe ser una copia estructural de ese bloque, apoyada en el banco `'No especificado'` que la migración `006_gastos_banco_id.sql` (paso 1) ya sembró por usuario en la tabla `bancos` (definida en `005_bancos_e_ingresos.sql`).
+Convenciones ya establecidas que esta tarea debe seguir:
+- Resolución de FK "opcional": *tomar el id del payload si viene; si no, buscar por nombre
+  el registro de respaldo del usuario fijo*. Ya se aplica idéntico para `categoria_id` →
+  "Otros" (líneas 83-99) y para `banco_id` → "No especificado" (líneas 101-119).
+- Los nombres de respaldo son constantes al tope del archivo (`NOMBRE_BANCO_NO_ESPECIFICADO`).
+- Validación de tipos de opcionales centralizada en `validarPayload`:
+  `if (payload.x != null && typeof payload.x !== 'string') return { valido:false, motivo:'validación' }`.
+- El `usuario_id` SIEMPRE es el fijo del servidor (`GASTORIN_USUARIO_ID`).
 
-Los helpers puros (validación, tipos) viven en `logica.ts`; el tipo `PayloadImportarBorrador` declara los campos opcionales del body y `validarPayload` valida tipos de los opcionales (ej. `categoria_id` debe ser `string` si viene). El banco de respaldo se sembró con el literal exacto `'No especificado'`, por lo que `.eq('nombre', 'No especificado')` (match exacto, igual que `'Otros'`) es correcto.
+Esta feature encaja exactamente en el patrón: extiende el bloque de resolución de banco
+existente (líneas 101-119 de `index.ts`), sin tocar capas ni introducir estructuras nuevas.
 
 ## Desviación de arquitectura
 - ¿Se necesita desviarse? **NO.**
-- El fix encaja de forma natural en el patrón ya establecido para `categoria_id`. No cambia el modelo de datos, no introduce un patrón nuevo, no afecta a más de un módulo. Es el mínimo para desbloquear la ingesta (los 11 gastos rechazados hoy con HTTP 500). La inferencia real de banco desde el contenido del correo (Épica 5) queda **fuera de alcance** y NO se toca aquí.
-- No dispara GATE 1.
+- La feature reutiliza el patrón de resolución de FK opcional. Solo agrega un paso intermedio
+  (buscar por nombre) antes del respaldo ya existente. No cambia el modelo de datos
+  (`banco_nombre` NO se persiste; es solo entrada del payload para resolver `banco_id`), no
+  afecta a otros módulos, no introduce un patrón nuevo. **No dispara GATE 1.**
 
 ## Archivos a crear/modificar
+- `supabase/functions/importar-borrador/logica.ts` — modificar — agregar `banco_nombre?: unknown`
+  al interface `PayloadImportarBorrador` y su validación de tipo en `validarPayload`.
+- `supabase/functions/importar-borrador/index.ts` — modificar — reemplazar el bloque de
+  resolución de banco (líneas 101-119) por el bloque de "Código exacto" de abajo.
+- `supabase/functions/importar-borrador/__tests__/index.spec.ts` — modificar — extender el
+  mock de `bancos` para soportar `.ilike().maybeSingle()` y llamadas secuenciales, y agregar
+  los casos nuevos.
 
-### 1. `supabase/functions/importar-borrador/index.ts` — modificar
-Chunk A.
+Los tres archivos son la misma feature; **no** paralelizar. Orden: logica.ts → index.ts → tests.
 
-**A.1 — Agregar constante** junto a `NOMBRE_CATEGORIA_OTROS` (tras la línea 26):
+## Código exacto
+
+### 1. `logica.ts`
+
+En el interface `PayloadImportarBorrador`, junto a `banco_id?: unknown`:
 ```ts
-/** Nombre del banco de respaldo cuando el payload no trae `banco_id` (sembrado por la migración 006). */
-const NOMBRE_BANCO_NO_ESPECIFICADO = 'No especificado'
+  banco_id?: unknown
+  banco_nombre?: unknown
 ```
 
-**A.2 — Insertar el bloque de resolución de banco** justo después de la resolución de categoría (después de la línea 97, antes de `const estado = resolverEstado(payload)`):
+En `validarPayload`, justo después del bloque de `banco_id` (tras la línea 65):
 ```ts
-  // --- Resuelve el banco: el del payload, o "No especificado" del usuario fijo. ---
-  // Mínimo para desbloquear la ingesta tras la migración 006 (gastos.banco_id NOT NULL).
-  // La inferencia de banco desde el correo (Épica 5) queda fuera de alcance.
+  if (payload.banco_nombre != null && typeof payload.banco_nombre !== 'string') {
+    return { valido: false, motivo: 'validación' }
+  }
+```
+
+### 2. `index.ts` — reemplaza el bloque de las líneas 101-119 por:
+```ts
+  // --- Resuelve el banco. Prioridad de mayor a menor:
+  //   1) payload.banco_id explícito: se usa tal cual (se confía; el FK de la BD
+  //      lo rechaza si es inválido). Gana sobre banco_nombre si ambos vienen.
+  //   2) payload.banco_nombre: busca el banco del usuario fijo por nombre,
+  //      case-insensitive (la tabla tiene índice único sobre lower(nombre)).
+  //   3) Respaldo "No especificado" del usuario fijo: cuando no vino banco_id, y
+  //      además no vino banco_nombre O el nombre pedido no existe en el catálogo.
+  // El fallback a "No especificado" es SILENCIOSO a propósito: un proceso
+  // automático de ingesta no debe fallar toda la importación de un correo solo
+  // porque el usuario aún no creó ese banco en su catálogo.
   let bancoId = typeof payload.banco_id === 'string' ? payload.banco_id : null
+
+  if (!bancoId && typeof payload.banco_nombre === 'string' && payload.banco_nombre.trim() !== '') {
+    // `.ilike` con el nombre literal (sin comodines añadidos) => comparación
+    // exacta case-insensitive, coherente con el índice único sobre lower(nombre).
+    // `.maybeSingle()` para que "no encontrado" devuelva data=null SIN error.
+    const { data: bancoPorNombre } = await supabase
+      .from('bancos')
+      .select('id')
+      .eq('usuario_id', usuarioId)
+      .ilike('nombre', payload.banco_nombre)
+      .maybeSingle()
+    if (bancoPorNombre) {
+      bancoId = bancoPorNombre.id as string
+    }
+  }
+
   if (!bancoId) {
     const { data: bancoRespaldo, error: errorBanco } = await supabase
       .from('bancos')
@@ -50,51 +103,48 @@ const NOMBRE_BANCO_NO_ESPECIFICADO = 'No especificado'
   }
 ```
 
-**A.3 — Añadir `banco_id` al objeto del `insert`** en `.from('gastos').insert({ ... })` (dentro del bloque de las líneas 103-114), junto a `categoria_id`:
-```ts
-      banco_id: bancoId,
-```
-
-### 2. `supabase/functions/importar-borrador/logica.ts` — modificar
-Chunk A (mismo cambio lógico que el índice; buildear junto).
-
-**A.4 — Declarar el campo en el tipo** `PayloadImportarBorrador` (tras `categoria_id?: unknown`, línea 22):
-```ts
-  banco_id?: unknown
-```
-
-**A.5 — Validar su tipo si viene** en `validarPayload`, análogo a `categoria_id` (tras la línea 61):
-```ts
-  if (payload.banco_id != null && typeof payload.banco_id !== 'string') {
-    return { valido: false, motivo: 'validación' }
-  }
-```
-
-### 3. `supabase/functions/importar-borrador/__tests__/index.spec.ts` — modificar
-Chunk B (depende de A: escribir después de que exista el nuevo comportamiento).
-
-El mock de Supabase hoy solo conoce `categorias` (select por doble `eq` -> `single`, vía `selectSingleMock`) y todo lo demás lo trata como builder de `insert`. Con el fix, **todo insert de `gastos` sin `banco_id` disparará ahora una consulta a `bancos`** con la misma forma que la de `categorias`. Hay que:
-
-- **Generalizar** `crearBuilderSelectCategoria()` a `crearBuilderSelect(singleMock)` (misma cadena `select -> eq -> eq -> single`, pero recibiendo el mock a usar).
-- Renombrar `selectSingleMock` -> `selectCategoriaMock` y **agregar** `const selectBancoMock = vi.fn()`.
-- En `fromMock`: `if (tabla === 'categorias') return crearBuilderSelect(selectCategoriaMock); if (tabla === 'bancos') return crearBuilderSelect(selectBancoMock); return crearBuilderInsert()`.
-- En **cada test del flujo feliz que llega al insert** (los 5: "usuario_id se ignora", "idempotencia", "no-23505 -> 500", "sin categoria_id", "ambiguo") agregar `selectBancoMock.mockResolvedValueOnce({ data: { id: 'banco-no-esp-id' }, error: null })`. Los tests 401 y "400 payload inválido" NO llegan al banco y no cambian.
-- El test "sin categoria_id" pasa a usar `selectCategoriaMock` para la categoría y `selectBancoMock` para el banco (ya no comparten el mismo `vi.fn`).
-
-**Nuevos casos a agregar:**
-- Test: "sin banco_id, resuelve el banco 'No especificado' del usuario FIJO" — provee `categoria_id` pero no `banco_id`; `selectBancoMock` devuelve `{ id: 'banco-no-esp-id' }`; assertar `insertArg.banco_id === 'banco-no-esp-id'` y que `fromMock` fue llamado con `'bancos'`.
-- Test: "sin banco 'No especificado' para el usuario -> 400 con motivo claro" — `selectBancoMock.mockResolvedValueOnce({ data: null, error: { message: 'no rows' } })`; assertar `res.status === 400`, `cuerpo.motivo` contiene `No especificado`, y `insertMock` NO fue llamado. Análogo al patrón de la categoría faltante.
+Nota para el builder: `.ilike('nombre', valor)` interpreta `%` y `_` como comodines LIKE.
+Los nombres de banco reales ("BCP Debito", "IBK Debito") no los contienen, así que es
+aceptable. Escapar comodines queda **fuera de alcance** (ver sugerencias).
 
 ## Plan de pruebas
-- **Camino feliz (payload con banco_id):** el `insert` usa el `banco_id` del payload tal cual; devuelve 201 `creado`.
-- **Camino feliz (payload sin banco_id):** resuelve el banco `'No especificado'` del usuario fijo y lo usa en el `insert` -> 201 `creado` con `banco_id` = id del banco de respaldo. (Nuevo test).
-- **Borde/error — banco de respaldo ausente:** no existe banco `'No especificado'` para el usuario -> 400 con motivo `no existe el banco "No especificado" para el usuario`, sin ejecutar el `insert`. (Nuevo test).
-- **Regresión — categoría de respaldo:** el flujo existente de `'Otros'` sigue funcionando (test "sin categoria_id" ya presente, ajustado por el mock de `bancos`).
-- **Regresión — idempotencia:** reimporte (23505) sigue devolviendo 200 `omitido` (con banco resuelto antes del insert).
-- **Regresión — error no-unicidad:** un error de Postgres distinto de 23505 sigue propagándose como 500.
-- **Regresión — auth y validación:** 401 con bearer inválido y 400 con payload sin `gmail_message_id` no cambian (no llegan al lookup de banco).
-- **Validación de tipo:** si `banco_id` viene con tipo no-string, `validarPayload` responde 400 `validación` (cubierto por A.5; opcional añadir test en `logica.spec.ts`).
+Alineado con el mock de `__tests__/index.spec.ts`.
 
-## Notas / sugerencias fuera de alcance (no implementar aquí)
-- Inferencia real del banco desde el contenido del correo (Épica 5) — pendiente, decisión de Architect.
-- El `heartbeat` (`registrar-ejecucion-ingesta`) no toca `gastos`; confirmado que NO se ve afectado por este bug ni por este fix.
+**Prerrequisito de mocks (ajuste técnico):** `crearBuilderSelect` hoy solo modela
+`.select().eq().eq().single()`. Para los casos con `banco_nombre` hay que:
+- Extender el builder de `bancos` para soportar también `.select().eq().ilike().maybeSingle()`.
+- Permitir dos llamadas secuenciales a `bancos` en un mismo request (primero lookup por
+  nombre, luego fallback "No especificado"), resolviendo con `mockResolvedValueOnce` en orden.
+- Opción simple: builder de `bancos` que exponga tanto `eq(...).ilike(...).maybeSingle()`
+  como `eq(...).eq(...).single()`, con un mock dedicado `selectBancoPorNombreMock` para el
+  path `ilike` y el `selectBancoMock` existente para el respaldo.
+
+Casos:
+
+- **Camino feliz — `banco_nombre` encontrado case-insensitive:** payload sin `banco_id`,
+  con `banco_nombre: 'ibk debito'`; el lookup por nombre resuelve `{ data: { id: 'banco-ibk-id' } }`.
+  Espera 201, `insertArg.banco_id === 'banco-ibk-id'`, y que NO se consultó el fallback
+  "No especificado" (una sola resolución de banco).
+
+- **`banco_id` explícito gana sobre `banco_nombre`:** payload con AMBOS `banco_id: 'banco-x'`
+  y `banco_nombre: 'BCP Debito'`. Espera 201, `insertArg.banco_id === 'banco-x'`, y que
+  `fromMock` NO consultó la tabla `bancos` en absoluto (ni por nombre ni respaldo).
+
+- **Borde — `banco_nombre` NO encontrado cae a "No especificado" sin error:** payload sin
+  `banco_id`, con `banco_nombre: 'Banco Inexistente'`; lookup por nombre resuelve
+  `{ data: null }` (maybeSingle, sin error) y el fallback resuelve `{ id: 'banco-no-esp-id' }`.
+  Espera 201, `insertArg.banco_id === 'banco-no-esp-id'`, `res.status` != 400, y dos
+  consultas a `bancos` en orden (ilike, luego eq).
+
+- **Sin cambios — ninguno de los dos viene (comportamiento actual):** ya cubierto por los
+  tests existentes "sin banco_id, resuelve el banco No especificado" y "sin banco No
+  especificado -> 400". Confirmar que siguen pasando (solo pueden requerir ajuste del builder mock).
+
+- **Validación (nuevo, opcional):** `banco_nombre` de tipo no-string (ej. número) => 400
+  `validación`, sin ejecutar insert (espeja el patrón de `banco_id`; test en `logica.spec.ts`).
+
+## Sugerencias fuera de alcance (no incluidas en el plan)
+- Escapar comodines LIKE (`% _ \`) en `banco_nombre` antes del `.ilike`, si se quiere robustez
+  ante nombres de banco con esos caracteres.
+- Persistir el nombre crudo recibido / telemetría de cuántas importaciones cayeron al fallback
+  por nombre no encontrado (útil para detectar catálogos incompletos) — decisión de producto.

@@ -5,6 +5,7 @@ let capturedHandler: ((req: Request) => Promise<Response>) | null = null
 const insertMock = vi.fn()
 const selectCategoriaMock = vi.fn()
 const selectBancoMock = vi.fn()
+const selectBancoPorNombreMock = vi.fn()
 
 function crearBuilderInsert() {
   return {
@@ -28,9 +29,27 @@ function crearBuilderSelect(singleMock: ReturnType<typeof vi.fn>) {
   }
 }
 
+// Builder dedicado de `bancos`: soporta tanto `.eq().eq().single()` (respaldo
+// "No especificado") como `.eq().ilike().maybeSingle()` (lookup por
+// `banco_nombre`), ya que un mismo request puede encadenar ambas llamadas.
+function crearBuilderBancos() {
+  return {
+    select: vi.fn(() => ({
+      eq: vi.fn(() => ({
+        eq: vi.fn(() => ({
+          single: selectBancoMock,
+        })),
+        ilike: vi.fn(() => ({
+          maybeSingle: selectBancoPorNombreMock,
+        })),
+      })),
+    })),
+  }
+}
+
 const fromMock = vi.fn((tabla: string) => {
   if (tabla === 'categorias') return crearBuilderSelect(selectCategoriaMock)
-  if (tabla === 'bancos') return crearBuilderSelect(selectBancoMock)
+  if (tabla === 'bancos') return crearBuilderBancos()
   return crearBuilderInsert()
 })
 
@@ -236,6 +255,86 @@ describe('Edge Function importar-borrador (index.ts) — validación independien
     expect(res.status).toBe(400)
     expect(cuerpo.motivo).toContain('No especificado')
     expect(insertMock).not.toHaveBeenCalled()
+  })
+
+  it('banco_id explícito gana sobre banco_nombre: no consulta la tabla "bancos" en absoluto', async () => {
+    insertMock.mockResolvedValueOnce({ data: { id: 'g5' }, error: null })
+
+    const req = crearRequest({
+      gmail_message_id: 'msg-banco-id-gana',
+      fecha: '2026-07-20',
+      monto: 10,
+      moneda: 'PEN',
+      categoria_id: 'cat-1',
+      banco_id: 'banco-x',
+      banco_nombre: 'BCP Debito',
+    })
+    const res = await capturedHandler!(req)
+    await res.json()
+
+    expect(res.status).toBe(201)
+    const llamadaBancos = fromMock.mock.calls.find((c) => c[0] === 'bancos')
+    expect(llamadaBancos).toBeUndefined()
+
+    const llamadaGastos = fromMock.mock.results.find(
+      (r, i) => fromMock.mock.calls[i][0] === 'gastos',
+    )
+    const insertArg = (llamadaGastos!.value as any).insert.mock.calls[0][0]
+    expect(insertArg.banco_id).toBe('banco-x')
+  })
+
+  it('banco_nombre encontrado (case-insensitive): resuelve banco_id sin consultar el respaldo', async () => {
+    selectBancoPorNombreMock.mockResolvedValueOnce({ data: { id: 'banco-ibk-id' }, error: null })
+    insertMock.mockResolvedValueOnce({ data: { id: 'g6' }, error: null })
+
+    const req = crearRequest({
+      gmail_message_id: 'msg-banco-nombre-encontrado',
+      fecha: '2026-07-20',
+      monto: 10,
+      moneda: 'PEN',
+      categoria_id: 'cat-1',
+      banco_nombre: 'ibk debito',
+    })
+    const res = await capturedHandler!(req)
+    await res.json()
+
+    expect(res.status).toBe(201)
+    expect(selectBancoMock).not.toHaveBeenCalled()
+
+    const llamadaGastos = fromMock.mock.results.find(
+      (r, i) => fromMock.mock.calls[i][0] === 'gastos',
+    )
+    const insertArg = (llamadaGastos!.value as any).insert.mock.calls[0][0]
+    expect(insertArg.banco_id).toBe('banco-ibk-id')
+  })
+
+  it('banco_nombre no encontrado cae al respaldo "No especificado" sin error (fallback silencioso)', async () => {
+    selectBancoPorNombreMock.mockResolvedValueOnce({ data: null, error: null })
+    selectBancoMock.mockResolvedValueOnce({ data: { id: 'banco-no-esp-id' }, error: null })
+    insertMock.mockResolvedValueOnce({ data: { id: 'g7' }, error: null })
+
+    const req = crearRequest({
+      gmail_message_id: 'msg-banco-nombre-no-encontrado',
+      fecha: '2026-07-20',
+      monto: 10,
+      moneda: 'PEN',
+      categoria_id: 'cat-1',
+      banco_nombre: 'Banco Inexistente',
+    })
+    const res = await capturedHandler!(req)
+    const cuerpo = await res.json()
+
+    expect(res.status).not.toBe(400)
+    expect(res.status).toBe(201)
+    expect(selectBancoPorNombreMock).toHaveBeenCalledTimes(1)
+    expect(selectBancoMock).toHaveBeenCalledTimes(1)
+
+    const llamadaGastos = fromMock.mock.results.find(
+      (r, i) => fromMock.mock.calls[i][0] === 'gastos',
+    )
+    const insertArg = (llamadaGastos!.value as any).insert.mock.calls[0][0]
+    expect(insertArg.banco_id).toBe('banco-no-esp-id')
+    expect(cuerpo.status).toBe('creado')
   })
 
   it('rechaza con 401 si el bearer no coincide con el token dedicado IMPORTAR_BORRADOR_TOKEN', async () => {

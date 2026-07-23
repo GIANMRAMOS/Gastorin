@@ -46,6 +46,24 @@ describe('validarPayload', () => {
     })
     expect(resultado).toEqual({ valido: true })
   })
+
+  it('borde: banco_nombre de tipo no-string (ej. número) es inválido', () => {
+    const resultado = validarPayload({
+      gmail_message_id: 'm',
+      fecha: '2026-07-20',
+      banco_nombre: 12345,
+    })
+    expect(resultado).toEqual({ valido: false, motivo: 'validación' })
+  })
+
+  it('camino feliz: banco_nombre como string junto a los requeridos es válido', () => {
+    const resultado = validarPayload({
+      gmail_message_id: 'm',
+      fecha: '2026-07-20',
+      banco_nombre: 'BCP Debito',
+    })
+    expect(resultado).toEqual({ valido: true })
+  })
 })
 
 describe('resolverEstado', () => {

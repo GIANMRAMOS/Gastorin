@@ -21,6 +21,7 @@ export interface PayloadImportarBorrador {
   ambiguo?: unknown
   categoria_id?: unknown
   banco_id?: unknown
+  banco_nombre?: unknown
   descripcion?: unknown
   gmail_fragmento?: unknown
   usuario_id?: unknown
@@ -61,6 +62,9 @@ export function validarPayload(payload: PayloadImportarBorrador): ResultadoValid
     return { valido: false, motivo: 'validación' }
   }
   if (payload.banco_id != null && typeof payload.banco_id !== 'string') {
+    return { valido: false, motivo: 'validación' }
+  }
+  if (payload.banco_nombre != null && typeof payload.banco_nombre !== 'string') {
     return { valido: false, motivo: 'validación' }
   }
   return { valido: true }
