@@ -24,6 +24,8 @@ import { resolverEstado, validarPayload, type PayloadImportarBorrador } from './
 const CODIGO_POSTGRES_UNICIDAD = '23505'
 /** Nombre de la categoría de respaldo cuando el payload no trae `categoria_id`. */
 const NOMBRE_CATEGORIA_OTROS = 'Otros'
+/** Nombre del banco de respaldo cuando el payload no trae `banco_id` (sembrado por la migración 006). */
+const NOMBRE_BANCO_NO_ESPECIFICADO = 'No especificado'
 
 const cabecerasJson = { 'Content-Type': 'application/json' }
 
@@ -96,6 +98,26 @@ Deno.serve(async (req: Request) => {
     categoriaId = categoriaOtros.id as string
   }
 
+  // --- Resuelve el banco: el del payload, o "No especificado" del usuario fijo. ---
+  // Mínimo para desbloquear la ingesta tras la migración 006 (gastos.banco_id NOT NULL).
+  // La inferencia de banco desde el correo (Épica 5) queda fuera de alcance.
+  let bancoId = typeof payload.banco_id === 'string' ? payload.banco_id : null
+  if (!bancoId) {
+    const { data: bancoRespaldo, error: errorBanco } = await supabase
+      .from('bancos')
+      .select('id')
+      .eq('usuario_id', usuarioId)
+      .eq('nombre', NOMBRE_BANCO_NO_ESPECIFICADO)
+      .single()
+    if (errorBanco || !bancoRespaldo) {
+      return respuestaJson(
+        { status: 'error', motivo: 'no existe el banco "No especificado" para el usuario' },
+        400,
+      )
+    }
+    bancoId = bancoRespaldo.id as string
+  }
+
   const estado = resolverEstado(payload)
 
   const { data: gastoInsertado, error: errorInsercion } = await supabase
@@ -103,6 +125,7 @@ Deno.serve(async (req: Request) => {
     .insert({
       usuario_id: usuarioId,
       categoria_id: categoriaId,
+      banco_id: bancoId,
       monto: typeof payload.monto === 'number' ? payload.monto : null,
       moneda: payload.moneda === 'PEN' || payload.moneda === 'USD' ? payload.moneda : null,
       fecha: payload.fecha,

@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 let capturedHandler: ((req: Request) => Promise<Response>) | null = null
 
 const insertMock = vi.fn()
-const selectSingleMock = vi.fn()
+const selectCategoriaMock = vi.fn()
+const selectBancoMock = vi.fn()
 
 function crearBuilderInsert() {
   return {
@@ -15,12 +16,12 @@ function crearBuilderInsert() {
   }
 }
 
-function crearBuilderSelectCategoria() {
+function crearBuilderSelect(singleMock: ReturnType<typeof vi.fn>) {
   return {
     select: vi.fn(() => ({
       eq: vi.fn(() => ({
         eq: vi.fn(() => ({
-          single: selectSingleMock,
+          single: singleMock,
         })),
       })),
     })),
@@ -28,7 +29,8 @@ function crearBuilderSelectCategoria() {
 }
 
 const fromMock = vi.fn((tabla: string) => {
-  if (tabla === 'categorias') return crearBuilderSelectCategoria()
+  if (tabla === 'categorias') return crearBuilderSelect(selectCategoriaMock)
+  if (tabla === 'bancos') return crearBuilderSelect(selectBancoMock)
   return crearBuilderInsert()
 })
 
@@ -74,6 +76,7 @@ describe('Edge Function importar-borrador (index.ts) — validación independien
   })
 
   it('usuario_id del payload se IGNORA: el insert siempre usa el usuario_id fijo del servidor', async () => {
+    selectBancoMock.mockResolvedValueOnce({ data: { id: 'banco-no-esp-id' }, error: null })
     insertMock.mockResolvedValueOnce({ data: { id: 'g1' }, error: null })
 
     const req = crearRequest({
@@ -103,6 +106,7 @@ describe('Edge Function importar-borrador (index.ts) — validación independien
   it('idempotencia: reimporte del mismo gmail_message_id responde 200 "omitido" (no un segundo insert lógico)', async () => {
     // El índice único parcial haría fallar el segundo INSERT con 23505;
     // simulamos esa respuesta de Postgres.
+    selectBancoMock.mockResolvedValueOnce({ data: { id: 'banco-no-esp-id' }, error: null })
     insertMock.mockResolvedValueOnce({
       data: null,
       error: { code: '23505', message: 'duplicate key value violates unique constraint' },
@@ -123,6 +127,7 @@ describe('Edge Function importar-borrador (index.ts) — validación independien
   })
 
   it('un error de Postgres que NO es 23505 (unicidad) se propaga como error 500, no como "omitido"', async () => {
+    selectBancoMock.mockResolvedValueOnce({ data: { id: 'banco-no-esp-id' }, error: null })
     insertMock.mockResolvedValueOnce({
       data: null,
       error: { code: '23503', message: 'foreign key violation' },
@@ -143,7 +148,8 @@ describe('Edge Function importar-borrador (index.ts) — validación independien
   })
 
   it('sin categoria_id, resuelve la categoría "Otros" del usuario FIJO (no del payload)', async () => {
-    selectSingleMock.mockResolvedValueOnce({ data: { id: 'cat-otros-id' }, error: null })
+    selectCategoriaMock.mockResolvedValueOnce({ data: { id: 'cat-otros-id' }, error: null })
+    selectBancoMock.mockResolvedValueOnce({ data: { id: 'banco-no-esp-id' }, error: null })
     insertMock.mockResolvedValueOnce({ data: { id: 'g2' }, error: null })
 
     const req = crearRequest({
@@ -168,6 +174,7 @@ describe('Edge Function importar-borrador (index.ts) — validación independien
   })
 
   it('borrador ambiguo/incompleto se inserta con estado revision_manual, monto y moneda nulos', async () => {
+    selectBancoMock.mockResolvedValueOnce({ data: { id: 'banco-no-esp-id' }, error: null })
     insertMock.mockResolvedValueOnce({ data: { id: 'g3' }, error: null })
 
     const req = crearRequest({
@@ -186,6 +193,49 @@ describe('Edge Function importar-borrador (index.ts) — validación independien
     expect(insertArg.estado).toBe('revision_manual')
     expect(insertArg.monto).toBeNull()
     expect(insertArg.moneda).toBeNull()
+  })
+
+  it('sin banco_id, resuelve el banco "No especificado" del usuario FIJO', async () => {
+    selectBancoMock.mockResolvedValueOnce({ data: { id: 'banco-no-esp-id' }, error: null })
+    insertMock.mockResolvedValueOnce({ data: { id: 'g4' }, error: null })
+
+    const req = crearRequest({
+      gmail_message_id: 'msg-sin-banco',
+      fecha: '2026-07-20',
+      monto: 10,
+      moneda: 'PEN',
+      categoria_id: 'cat-1',
+    })
+    const res = await capturedHandler!(req)
+    await res.json()
+
+    expect(res.status).toBe(201)
+    const llamadaBancos = fromMock.mock.calls.find((c) => c[0] === 'bancos')
+    expect(llamadaBancos).toBeTruthy()
+
+    const llamadaGastos = fromMock.mock.results.find(
+      (r, i) => fromMock.mock.calls[i][0] === 'gastos',
+    )
+    const insertArg = (llamadaGastos!.value as any).insert.mock.calls[0][0]
+    expect(insertArg.banco_id).toBe('banco-no-esp-id')
+  })
+
+  it('sin banco "No especificado" para el usuario -> 400 con motivo claro, sin ejecutar el insert', async () => {
+    selectBancoMock.mockResolvedValueOnce({ data: null, error: { message: 'no rows' } })
+
+    const req = crearRequest({
+      gmail_message_id: 'msg-sin-banco-respaldo',
+      fecha: '2026-07-20',
+      monto: 10,
+      moneda: 'PEN',
+      categoria_id: 'cat-1',
+    })
+    const res = await capturedHandler!(req)
+    const cuerpo = await res.json()
+
+    expect(res.status).toBe(400)
+    expect(cuerpo.motivo).toContain('No especificado')
+    expect(insertMock).not.toHaveBeenCalled()
   })
 
   it('rechaza con 401 si el bearer no coincide con el token dedicado IMPORTAR_BORRADOR_TOKEN', async () => {

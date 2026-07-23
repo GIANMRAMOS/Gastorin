@@ -1,98 +1,100 @@
-# Micro-plan — Modales y hoja del FAB solo cierran por botón explícito (no backdrop, no Escape)
+# Micro-plan — Fix: resolver `banco_id` en importar-borrador (usar banco de respaldo "No especificado")
 
 ## Patrón arquitectónico detectado
-Overlays construidos como componentes de un solo archivo `.vue` (`<script setup lang="ts">` + `<template>` + `<style scoped>`), controlados por el padre con `v-if`. No son rutas. El cierre se comunica hacia arriba con `emit('cerrar')` (o `emit('cancelar')` en `DialogoConfirmacion`). El padre decide qué hacer con ese evento; el componente nunca se auto-desmonta.
+La Edge Function `supabase/functions/importar-borrador/index.ts` sigue un patrón muy explícito y ya establecido para las FK obligatorias del `insert` en `gastos`:
 
-Patrón de cierre uniforme en 6 de los 7 componentes (los 5 modales + la hoja del FAB):
-1. `@click.self="emit('cerrar')"` en el div de fondo (`.modal-fondo` / `.hoja-fondo`).
-2. Función `manejarTecla(evento: KeyboardEvent)` que hace `emit('cerrar')` si `evento.key === 'Escape'`.
-3. Registro/desregistro de esa función: `window.addEventListener('keydown', manejarTecla)` en `onMounted` y `window.removeEventListener(...)` en `onUnmounted`.
-4. Botón X (`button.modal-cerrar`, `@click="emit('cerrar')"`) — solo en los 5 modales, NO en la hoja del FAB.
-5. `storeUi.abrirModal()` / `storeUi.cerrarModal()` en `onMounted`/`onUnmounted` (oculta el bottom nav). ESTO NO SE TOCA.
+1. Tomar el id del payload si viene y es `string`; si no, resolver un valor de respaldo por usuario fijo consultando su propia tabla con `.select('id').eq('usuario_id', usuarioId).eq('nombre', <NOMBRE>).single()`.
+2. Si la consulta de respaldo falla o no devuelve fila, cortar con `respuestaJson({ status: 'error', motivo: '...' }, 400)` (motivo legible, no 500).
+3. Usar el id resuelto en el objeto del `insert`.
 
-`DialogoConfirmacion.vue` es la excepción: NO tiene `manejarTecla`, NO tiene `onMounted`/`onUnmounted`, NO tiene botón X ni usa `storeUi`. Solo tiene `@click.self="emit('cancelar')"` en `.modal-fondo` y botones "Confirmar"/"Cancelar". Emite `cancelar` (no `cerrar`).
+Esto ya existe para `categoria_id` (líneas 81-97) usando la categoría `'Otros'` del usuario fijo, con la constante `NOMBRE_CATEGORIA_OTROS`. La resolución de `banco_id` debe ser una copia estructural de ese bloque, apoyada en el banco `'No especificado'` que la migración `006_gastos_banco_id.sql` (paso 1) ya sembró por usuario en la tabla `bancos` (definida en `005_bancos_e_ingresos.sql`).
 
-El cambio pedido encaja de lleno en este patrón: se remueve el mecanismo de cierre por backdrop y por Escape, dejando solo el botón explícito (X / Cancelar), que ya funciona vía `emit`.
+Los helpers puros (validación, tipos) viven en `logica.ts`; el tipo `PayloadImportarBorrador` declara los campos opcionales del body y `validarPayload` valida tipos de los opcionales (ej. `categoria_id` debe ser `string` si viene). El banco de respaldo se sembró con el literal exacto `'No especificado'`, por lo que `.eq('nombre', 'No especificado')` (match exacto, igual que `'Otros'`) es correcto.
 
 ## Desviación de arquitectura
 - ¿Se necesita desviarse? **NO.**
-- Es la eliminación de dos manejadores de evento (click en backdrop y keydown/Escape) en componentes ya construidos, con patrón uniforme. No cambia estructura de carpetas, ni capas, ni modelo de datos, ni el contrato de eventos (`cerrar`/`cancelar` se siguen emitiendo desde el botón). No afecta a los padres (siguen escuchando el mismo evento). NO dispara GATE 1.
+- El fix encaja de forma natural en el patrón ya establecido para `categoria_id`. No cambia el modelo de datos, no introduce un patrón nuevo, no afecta a más de un módulo. Es el mínimo para desbloquear la ingesta (los 11 gastos rechazados hoy con HTTP 500). La inferencia real de banco desde el contenido del correo (Épica 5) queda **fuera de alcance** y NO se toca aquí.
+- No dispara GATE 1.
 
 ## Archivos a crear/modificar
 
-### Componentes (todos son chunks independientes — no se solapan, el build puede paralelizarse)
+### 1. `supabase/functions/importar-borrador/index.ts` — modificar
+Chunk A.
 
-- `src/components/ModalGasto.vue` — modificar:
-  - Template L41: `<div class="modal-fondo" @click.self="emit('cerrar')">` → `<div class="modal-fondo">` (quitar solo el handler; conservar la clase para el estilo del overlay).
-  - Script: borrar la función `manejarTecla` completa (L23-28, incluido su JSDoc L23).
-  - `onMounted` (L30-33): quitar L31 `window.addEventListener('keydown', manejarTecla)`; conservar `storeUi.abrirModal()`.
-  - `onUnmounted` (L34-37): quitar L35 `window.removeEventListener('keydown', manejarTecla)`; conservar `storeUi.cerrarModal()`.
-  - `onMounted`/`onUnmounted` siguen usándose (por `storeUi`), así que el import de L2 se mantiene.
-  - Actualizar el JSDoc del componente (L9-10): "Cierra con clic en el backdrop, la tecla Escape o el botón de cierre." → "Cierra solo con el botón de cierre (X)."
+**A.1 — Agregar constante** junto a `NOMBRE_CATEGORIA_OTROS` (tras la línea 26):
+```ts
+/** Nombre del banco de respaldo cuando el payload no trae `banco_id` (sembrado por la migración 006). */
+const NOMBRE_BANCO_NO_ESPECIFICADO = 'No especificado'
+```
 
-- `src/components/ModalIngreso.vue` — modificar: idéntico a ModalGasto. Template L36 (quitar `@click.self`), función `manejarTecla` L18-23, `addEventListener` L26, `removeEventListener` L31, JSDoc L8-9. Mantener `storeUi` y el import de L2.
+**A.2 — Insertar el bloque de resolución de banco** justo después de la resolución de categoría (después de la línea 97, antes de `const estado = resolverEstado(payload)`):
+```ts
+  // --- Resuelve el banco: el del payload, o "No especificado" del usuario fijo. ---
+  // Mínimo para desbloquear la ingesta tras la migración 006 (gastos.banco_id NOT NULL).
+  // La inferencia de banco desde el correo (Épica 5) queda fuera de alcance.
+  let bancoId = typeof payload.banco_id === 'string' ? payload.banco_id : null
+  if (!bancoId) {
+    const { data: bancoRespaldo, error: errorBanco } = await supabase
+      .from('bancos')
+      .select('id')
+      .eq('usuario_id', usuarioId)
+      .eq('nombre', NOMBRE_BANCO_NO_ESPECIFICADO)
+      .single()
+    if (errorBanco || !bancoRespaldo) {
+      return respuestaJson(
+        { status: 'error', motivo: 'no existe el banco "No especificado" para el usuario' },
+        400,
+      )
+    }
+    bancoId = bancoRespaldo.id as string
+  }
+```
 
-- `src/components/ModalCategoria.vue` — modificar: idéntico. Template L42, función L24-29, `addEventListener` L32, `removeEventListener` L36, JSDoc L9-10. Ojo: este emite además `pedir-desactivar` — NO tocar.
+**A.3 — Añadir `banco_id` al objeto del `insert`** en `.from('gastos').insert({ ... })` (dentro del bloque de las líneas 103-114), junto a `categoria_id`:
+```ts
+      banco_id: bancoId,
+```
 
-- `src/components/ModalBanco.vue` — modificar: idéntico a ModalIngreso. Template L36, función L18-23, `addEventListener` L26, `removeEventListener` L31, JSDoc L8-9.
+### 2. `supabase/functions/importar-borrador/logica.ts` — modificar
+Chunk A (mismo cambio lógico que el índice; buildear junto).
 
-- `src/components/ModalPresupuesto.vue` — modificar: idéntico. Template L42, función L24-29, `addEventListener` L32, `removeEventListener` L36, JSDoc L9-10. Emite además `pedir-eliminar` — NO tocar.
+**A.4 — Declarar el campo en el tipo** `PayloadImportarBorrador` (tras `categoria_id?: unknown`, línea 22):
+```ts
+  banco_id?: unknown
+```
 
-- `src/components/HojaAccionesFab.vue` — modificar:
-  - Template L37: `<div class="hoja-fondo" @click.self="emit('cerrar')">` → `<div class="hoja-fondo">`.
-  - Borrar función `manejarTecla` L19-24.
-  - `onMounted` L26-29: quitar L27 `addEventListener`; conservar `storeUi.abrirModal()`.
-  - `onUnmounted` L30-33: quitar L31 `removeEventListener`; conservar `storeUi.cerrarModal()`.
-  - Conservar el botón "Cancelar" (`.boton-cancelar-hoja`, L45-47) que emite `cerrar` — es ahora la ÚNICA vía de cierre (esta hoja no tiene X).
-  - Actualizar JSDoc L5-9 que menciona "(backdrop/Escape)".
+**A.5 — Validar su tipo si viene** en `validarPayload`, análogo a `categoria_id` (tras la línea 61):
+```ts
+  if (payload.banco_id != null && typeof payload.banco_id !== 'string') {
+    return { valido: false, motivo: 'validación' }
+  }
+```
 
-- `src/components/DialogoConfirmacion.vue` — modificar:
-  - Template L17: `<div class="modal-fondo" @click.self="emit('cancelar')">` → `<div class="modal-fondo">`.
-  - No hay `manejarTecla` ni `onMounted`/`onUnmounted` que tocar.
-  - Conservar los botones "Confirmar"/"Cancelar" (L21-22).
+### 3. `supabase/functions/importar-borrador/__tests__/index.spec.ts` — modificar
+Chunk B (depende de A: escribir después de que exista el nuevo comportamiento).
 
-### Tests
-- `src/components/__tests__/DialogoConfirmacion.spec.ts` — modificar (invertir 1 caso).
-- `src/components/__tests__/HojaAccionesFab.spec.ts` — modificar (invertir 2 casos, revisar 2).
-- `src/components/__tests__/ModalGasto.spec.ts` — **crear**.
-- `src/components/__tests__/ModalIngreso.spec.ts` — **crear**.
-- `src/components/__tests__/ModalCategoria.spec.ts` — **crear**.
-- `src/components/__tests__/ModalBanco.spec.ts` — **crear**.
-- `src/components/__tests__/ModalPresupuesto.spec.ts` — **crear**.
+El mock de Supabase hoy solo conoce `categorias` (select por doble `eq` -> `single`, vía `selectSingleMock`) y todo lo demás lo trata como builder de `insert`. Con el fix, **todo insert de `gastos` sin `banco_id` disparará ahora una consulta a `bancos`** con la misma forma que la de `categorias`. Hay que:
 
-Nota: hoy NO existen specs para los 5 modales; solo hay specs para `DialogoConfirmacion` y `HojaAccionesFab`. `CategoriasView.spec.ts` y `PresupuestosView.spec.ts` referencian modales pero NO prueban cierre por backdrop/Escape (grep sin coincidencias), así que no requieren cambios por esta tarea.
+- **Generalizar** `crearBuilderSelectCategoria()` a `crearBuilderSelect(singleMock)` (misma cadena `select -> eq -> eq -> single`, pero recibiendo el mock a usar).
+- Renombrar `selectSingleMock` -> `selectCategoriaMock` y **agregar** `const selectBancoMock = vi.fn()`.
+- En `fromMock`: `if (tabla === 'categorias') return crearBuilderSelect(selectCategoriaMock); if (tabla === 'bancos') return crearBuilderSelect(selectBancoMock); return crearBuilderInsert()`.
+- En **cada test del flujo feliz que llega al insert** (los 5: "usuario_id se ignora", "idempotencia", "no-23505 -> 500", "sin categoria_id", "ambiguo") agregar `selectBancoMock.mockResolvedValueOnce({ data: { id: 'banco-no-esp-id' }, error: null })`. Los tests 401 y "400 payload inválido" NO llegan al banco y no cambian.
+- El test "sin categoria_id" pasa a usar `selectCategoriaMock` para la categoría y `selectBancoMock` para el banco (ya no comparten el mismo `vi.fn`).
+
+**Nuevos casos a agregar:**
+- Test: "sin banco_id, resuelve el banco 'No especificado' del usuario FIJO" — provee `categoria_id` pero no `banco_id`; `selectBancoMock` devuelve `{ id: 'banco-no-esp-id' }`; assertar `insertArg.banco_id === 'banco-no-esp-id'` y que `fromMock` fue llamado con `'bancos'`.
+- Test: "sin banco 'No especificado' para el usuario -> 400 con motivo claro" — `selectBancoMock.mockResolvedValueOnce({ data: null, error: { message: 'no rows' } })`; assertar `res.status === 400`, `cuerpo.motivo` contiene `No especificado`, y `insertMock` NO fue llamado. Análogo al patrón de la categoría faltante.
 
 ## Plan de pruebas
+- **Camino feliz (payload con banco_id):** el `insert` usa el `banco_id` del payload tal cual; devuelve 201 `creado`.
+- **Camino feliz (payload sin banco_id):** resuelve el banco `'No especificado'` del usuario fijo y lo usa en el `insert` -> 201 `creado` con `banco_id` = id del banco de respaldo. (Nuevo test).
+- **Borde/error — banco de respaldo ausente:** no existe banco `'No especificado'` para el usuario -> 400 con motivo `no existe el banco "No especificado" para el usuario`, sin ejecutar el `insert`. (Nuevo test).
+- **Regresión — categoría de respaldo:** el flujo existente de `'Otros'` sigue funcionando (test "sin categoria_id" ya presente, ajustado por el mock de `bancos`).
+- **Regresión — idempotencia:** reimporte (23505) sigue devolviendo 200 `omitido` (con banco resuelto antes del insert).
+- **Regresión — error no-unicidad:** un error de Postgres distinto de 23505 sigue propagándose como 500.
+- **Regresión — auth y validación:** 401 con bearer inválido y 400 con payload sin `gmail_message_id` no cambian (no llegan al lookup de banco).
+- **Validación de tipo:** si `banco_id` viene con tipo no-string, `validarPayload` responde 400 `validación` (cubierto por A.5; opcional añadir test en `logica.spec.ts`).
 
-### Tests existentes que verifican HOY que backdrop/Escape SÍ cierran → van a fallar, hay que invertirlos
-
-- `DialogoConfirmacion.spec.ts` L32-39 — `'borde: clic en el fondo del modal también cancela (no confirma)'`: hace `find('.modal-fondo').trigger('click')` y espera `emitted('cancelar')` con longitud 1. **Invertir**: renombrar a "clic en el fondo NO cancela" y esperar que `emitted('cancelar')` sea `undefined` (y `confirmar` siga `undefined`).
-
-- `HojaAccionesFab.spec.ts` L49-56 — `'cierra al hacer clic en el backdrop...'`: espera `emitted('cerrar')` longitud 1. **Invertir**: "NO cierra al hacer clic en el backdrop" → esperar `emitted('cerrar')` `undefined`.
-
-- `HojaAccionesFab.spec.ts` L67-75 — `'cierra al presionar Escape...'`: dispara `keydown` Escape y espera `emitted('cerrar')` longitud 1. **Invertir**: "NO cierra al presionar Escape" → esperar `emitted('cerrar')` `undefined`.
-
-### Tests existentes a revisar (premisa desactualizada, no fallan pero conviene ajustar)
-
-- `HojaAccionesFab.spec.ts` L58-65 — `'NO cierra al hacer clic dentro del contenido...'`: seguirá pasando, pero su descripción dice "(solo el backdrop dispara el cierre)", que ya es falso. Ajustar el texto del `it` (el backdrop ya no dispara cierre en absoluto).
-- `HojaAccionesFab.spec.ts` L77-85 — `'otras teclas no disparan el cierre'`: seguirá pasando (ninguna tecla cierra ya). Puede conservarse; opcionalmente reencuadrar como "ninguna tecla cierra la hoja" o eliminarse por redundante con el test de Escape invertido.
-
-### Tests existentes que deben seguir verdes sin cambios (botón explícito sigue cerrando)
-
-- `HojaAccionesFab.spec.ts` L87-94 — `'el botón "Cancelar" también emite cerrar'`.
-- `DialogoConfirmacion.spec.ts` L14-30 — Confirmar emite `confirmar`; Cancelar emite `cancelar` y no `confirmar`.
-
-### Tests nuevos (crear specs para los 5 modales)
-
-Para cada uno de `ModalGasto`, `ModalIngreso`, `ModalCategoria`, `ModalBanco`, `ModalPresupuesto` crear un spec con:
-
-- Camino feliz — el botón X cierra: `mount`, `find('button.modal-cerrar').trigger('click')`, esperar `emitted('cerrar')` longitud 1. Envolver en Pinia: `setActivePinia(createPinia())` en `beforeEach` (usan `useUiStore`) y `unmount` en `afterEach`. Para `ModalGasto`, `ModalCategoria` y `ModalPresupuesto` pasar la prop opcional (`gasto`/`categoria`/`presupuesto`) como `null` para el caso alta.
-- Borde — clic en el backdrop NO cierra: `find('.modal-fondo').trigger('click')`, esperar `emitted('cerrar')` `undefined`.
-- Borde — Escape NO cierra: `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`, `await nextTick`, esperar `emitted('cerrar')` `undefined`.
-- (Opcional, refuerza el contrato con el store) al montarse `storeUi.modalAbierto === true` y al `unmount()` vuelve a `false`, como ya hace el spec de `HojaAccionesFab`.
-
-Los formularios hijos (`FormularioGasto`, etc.) pueden dejarse montar normalmente o stubearse; si montarlos requiere dependencias pesadas (stores/servicios), stubearlos con `global.stubs` para aislar la prueba del overlay.
-
-## Sugerencias fuera de alcance (NO incluidas en el build)
-- El mecanismo de cierre (backdrop + Escape + botón + `storeUi`) está duplicado casi idéntico en 6 componentes. Un composable `useOverlay()` o un componente base `<ModalBase>` reduciría la duplicación y haría que cambios como este sean de un solo punto. No se aborda ahora para mantener el alcance acotado.
-- Accesibilidad: al quitar Escape, un modal con `aria-modal="true"` idealmente debería mantener foco atrapado y foco inicial en la X. Fuera del alcance de esta tarea.
+## Notas / sugerencias fuera de alcance (no implementar aquí)
+- Inferencia real del banco desde el contenido del correo (Épica 5) — pendiente, decisión de Architect.
+- El `heartbeat` (`registrar-ejecucion-ingesta`) no toca `gastos`; confirmado que NO se ve afectado por este bug ni por este fix.
