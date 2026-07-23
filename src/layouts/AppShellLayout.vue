@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import ModalGasto from '@/components/ModalGasto.vue'
 import ModalIngreso from '@/components/ModalIngreso.vue'
@@ -7,6 +7,8 @@ import HojaAccionesFab from '@/components/HojaAccionesFab.vue'
 import TextoVersion from '@/components/TextoVersion.vue'
 import { useAuth } from '@/composables/useAuth'
 import { useVersion } from '@/composables/useVersion'
+import { useBancos } from '@/composables/useBancos'
+import { useCategorias } from '@/composables/useCategorias'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { useGastosStore } from '@/stores/gastos'
@@ -25,6 +27,8 @@ const storeUi = useUiStore()
 const storeGastos = useGastosStore()
 const { cerrarSesion } = useAuth()
 const { textoVersion, commitCompleto } = useVersion()
+const { cargarBancos } = useBancos()
+const { cargarCategorias } = useCategorias()
 
 const modalGastoAbierto = ref(false)
 const modalIngresoAbierto = ref(false)
@@ -101,6 +105,22 @@ async function manejarSalir() {
     router.push({ name: 'login' })
   }
 }
+
+/**
+ * Hidrata el catálogo compartido de bancos y categorías apenas se monta el
+ * shell. Este es el único componente garantizado activo antes de que
+ * cualquier modal (gasto/ingreso) pueda abrirse, sin importar cuál sea la
+ * ruta hija actual: si esa carga viviera solo en el `onMounted` de cada
+ * vista, abrir "Nuevo gasto" desde una vista que no cargó bancos/categorías
+ * (p. ej. el Dashboard, sin haber visitado antes Historial/Bancos) mostraba
+ * "No hay bancos/categorías; créalos primero." aunque sí existieran en BD.
+ * Las llamadas equivalentes en las vistas se mantienen (son fire-and-forget
+ * y baratas): sirven como refresh de sesión al navegar.
+ */
+onMounted(() => {
+  cargarBancos()
+  cargarCategorias()
+})
 
 </script>
 

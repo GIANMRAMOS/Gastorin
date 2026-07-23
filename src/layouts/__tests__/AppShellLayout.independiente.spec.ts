@@ -19,6 +19,10 @@ vi.mock('@/composables/useVersion', () => ({
   useVersion: vi.fn(),
 }))
 
+// El shell hidrata bancos/categorías en su propio `onMounted` (fix del bug de
+// QA): se mockea el cliente de Supabase para no disparar red real al montar.
+vi.mock('@/lib/supabaseClient')
+
 async function montarShell() {
   const router = createRouter({
     history: createMemoryHistory(),
