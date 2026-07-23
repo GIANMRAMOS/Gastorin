@@ -6,8 +6,8 @@ import type { Gasto } from '@/types/gasto'
 
 /**
  * Envoltorio de modal/overlay para el formulario de gasto (alta o edición).
- * No es una ruta aparte: la vista controla su apertura con `v-if`. Cierra con
- * clic en el backdrop, la tecla Escape o el botón de cierre.
+ * No es una ruta aparte: la vista controla su apertura con `v-if`. Cierra
+ * solo con el botón de cierre (X).
  */
 defineProps<{
   gasto?: Gasto | null
@@ -20,25 +20,16 @@ const emit = defineEmits<{
 
 const storeUi = useUiStore()
 
-/** Cierra el modal al presionar Escape, sin importar dónde esté el foco. */
-function manejarTecla(evento: KeyboardEvent) {
-  if (evento.key === 'Escape') {
-    emit('cerrar')
-  }
-}
-
 onMounted(() => {
-  window.addEventListener('keydown', manejarTecla)
   storeUi.abrirModal()
 })
 onUnmounted(() => {
-  window.removeEventListener('keydown', manejarTecla)
   storeUi.cerrarModal()
 })
 </script>
 
 <template>
-  <div class="modal-fondo" @click.self="emit('cerrar')">
+  <div class="modal-fondo">
     <div class="modal-contenido" role="dialog" aria-modal="true">
       <div class="modal-cabecera">
         <h2>{{ gasto ? 'Editar gasto' : 'Nuevo gasto' }}</h2>

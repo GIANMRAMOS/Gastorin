@@ -6,8 +6,8 @@ import type { Categoria } from '@/types/gasto'
 
 /**
  * Envoltorio de modal/overlay para el formulario de categoría (alta o
- * edición/detalle), igual patrón que `ModalGasto.vue`. Cierra con clic en el
- * backdrop, la tecla Escape o el botón de cierre.
+ * edición/detalle), igual patrón que `ModalGasto.vue`. Cierra solo con el
+ * botón de cierre (X).
  */
 defineProps<{
   categoria?: Categoria | null
@@ -21,25 +21,16 @@ const emit = defineEmits<{
 
 const storeUi = useUiStore()
 
-/** Cierra el modal al presionar Escape, sin importar dónde esté el foco. */
-function manejarTecla(evento: KeyboardEvent) {
-  if (evento.key === 'Escape') {
-    emit('cerrar')
-  }
-}
-
 onMounted(() => {
-  window.addEventListener('keydown', manejarTecla)
   storeUi.abrirModal()
 })
 onUnmounted(() => {
-  window.removeEventListener('keydown', manejarTecla)
   storeUi.cerrarModal()
 })
 </script>
 
 <template>
-  <div class="modal-fondo" @click.self="emit('cerrar')">
+  <div class="modal-fondo">
     <div class="modal-contenido" role="dialog" aria-modal="true">
       <div class="modal-cabecera">
         <h2>{{ categoria ? 'Detalle de categoría' : 'Nueva categoría' }}</h2>

@@ -14,7 +14,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="modal-fondo" @click.self="emit('cancelar')">
+  <div class="modal-fondo">
     <div class="modal-contenido" role="alertdialog" aria-modal="true">
       <p>{{ mensaje }}</p>
       <div class="dialogo-acciones">

@@ -46,16 +46,16 @@ describe('HojaAccionesFab (Épica 11, UX — bottom sheet del FAB móvil)', () =
     expect(storeUi.modalAbierto).toBe(false)
   })
 
-  it('cierra al hacer clic en el backdrop (fuera del contenido de la hoja)', async () => {
+  it('NO cierra al hacer clic en el backdrop (fuera del contenido de la hoja)', async () => {
     const wrapper = mount(HojaAccionesFab)
     wrapperActivo = wrapper
 
     await wrapper.find('.hoja-fondo').trigger('click')
 
-    expect(wrapper.emitted('cerrar')).toHaveLength(1)
+    expect(wrapper.emitted('cerrar')).toBeUndefined()
   })
 
-  it('NO cierra al hacer clic dentro del contenido de la hoja (solo el backdrop dispara el cierre)', async () => {
+  it('NO cierra al hacer clic dentro del contenido de la hoja', async () => {
     const wrapper = mount(HojaAccionesFab)
     wrapperActivo = wrapper
 
@@ -64,17 +64,17 @@ describe('HojaAccionesFab (Épica 11, UX — bottom sheet del FAB móvil)', () =
     expect(wrapper.emitted('cerrar')).toBeUndefined()
   })
 
-  it('cierra al presionar Escape, sin importar dónde esté el foco', async () => {
+  it('NO cierra al presionar Escape', async () => {
     const wrapper = mount(HojaAccionesFab)
     wrapperActivo = wrapper
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.emitted('cerrar')).toHaveLength(1)
+    expect(wrapper.emitted('cerrar')).toBeUndefined()
   })
 
-  it('otras teclas no disparan el cierre', async () => {
+  it('ninguna tecla cierra la hoja', async () => {
     const wrapper = mount(HojaAccionesFab)
     wrapperActivo = wrapper
 

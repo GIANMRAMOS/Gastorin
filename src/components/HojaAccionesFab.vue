@@ -4,9 +4,9 @@ import { useUiStore } from '@/stores/ui'
 
 /**
  * Bottom sheet del FAB móvil (Épica 11, UX): ofrece elegir entre registrar un
- * gasto o un ingreso. Reutiliza el mismo mecanismo de overlay/cierre que
- * `ModalGasto` (backdrop/Escape) y llama `storeUi.abrirModal()`/`cerrarModal()`
- * al montarse/desmontarse para que el bottom nav se oculte detrás de la hoja.
+ * gasto o un ingreso. Cierra solo con el botón "Cancelar" (no tiene botón X).
+ * Llama `storeUi.abrirModal()`/`cerrarModal()` al montarse/desmontarse para
+ * que el bottom nav se oculte detrás de la hoja.
  */
 const emit = defineEmits<{
   cerrar: []
@@ -16,25 +16,16 @@ const emit = defineEmits<{
 
 const storeUi = useUiStore()
 
-/** Cierra la hoja al presionar Escape, sin importar dónde esté el foco. */
-function manejarTecla(evento: KeyboardEvent) {
-  if (evento.key === 'Escape') {
-    emit('cerrar')
-  }
-}
-
 onMounted(() => {
-  window.addEventListener('keydown', manejarTecla)
   storeUi.abrirModal()
 })
 onUnmounted(() => {
-  window.removeEventListener('keydown', manejarTecla)
   storeUi.cerrarModal()
 })
 </script>
 
 <template>
-  <div class="hoja-fondo" @click.self="emit('cerrar')">
+  <div class="hoja-fondo">
     <div class="hoja-contenido" role="dialog" aria-modal="true">
       <button type="button" class="opcion-hoja" @click="emit('registrar-gasto')">
         Registrar gasto

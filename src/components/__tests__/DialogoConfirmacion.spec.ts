@@ -29,12 +29,12 @@ describe('DialogoConfirmacion (HU-2.3)', () => {
     expect(wrapper.emitted('confirmar')).toBeUndefined()
   })
 
-  it('borde: clic en el fondo del modal también cancela (no confirma)', async () => {
+  it('borde: clic en el fondo del modal NO cancela', async () => {
     const wrapper = mount(DialogoConfirmacion, { props: { mensaje: 'Confirma' } })
 
     await wrapper.find('.modal-fondo').trigger('click')
 
-    expect(wrapper.emitted('cancelar')).toHaveLength(1)
+    expect(wrapper.emitted('cancelar')).toBeUndefined()
     expect(wrapper.emitted('confirmar')).toBeUndefined()
   })
 })

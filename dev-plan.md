@@ -1,73 +1,98 @@
-# Micro-plan — Retoque visual (tokens de diseño) + safe-area del bottom nav móvil
+# Micro-plan — Modales y hoja del FAB solo cierran por botón explícito (no backdrop, no Escape)
 
 ## Patrón arquitectónico detectado
-- App Vue 3 + Vite. El sistema de diseño vive en un único archivo global de tokens: `src/assets/estilos-base.css`, bloque `:root` (líneas 1-54). Todas las variables CSS de color, tipografía, espaciado y radios están centralizadas ahí.
-- Los componentes/layouts consumen esos tokens vía `var(--...)` en sus `<style scoped>`. Cambiar el valor de una variable en `:root` propaga automáticamente a todo consumidor que use `var(--...)`, sin tocar componentes.
-- El bottom nav móvil es una regla `.navegacion-inferior` dentro del `<style scoped>` de `src/layouts/AppShellLayout.vue` (líneas 480-497). Actualmente su padding vertical es `padding: var(--espacio-2) var(--espacio-4)`.
-- Este cambio encaja de forma natural en el patrón: es exactamente el uso previsto de los tokens centralizados. El safe-area es un ajuste local de una sola clase ya existente.
+Overlays construidos como componentes de un solo archivo `.vue` (`<script setup lang="ts">` + `<template>` + `<style scoped>`), controlados por el padre con `v-if`. No son rutas. El cierre se comunica hacia arriba con `emit('cerrar')` (o `emit('cancelar')` en `DialogoConfirmacion`). El padre decide qué hacer con ese evento; el componente nunca se auto-desmonta.
+
+Patrón de cierre uniforme en 6 de los 7 componentes (los 5 modales + la hoja del FAB):
+1. `@click.self="emit('cerrar')"` en el div de fondo (`.modal-fondo` / `.hoja-fondo`).
+2. Función `manejarTecla(evento: KeyboardEvent)` que hace `emit('cerrar')` si `evento.key === 'Escape'`.
+3. Registro/desregistro de esa función: `window.addEventListener('keydown', manejarTecla)` en `onMounted` y `window.removeEventListener(...)` en `onUnmounted`.
+4. Botón X (`button.modal-cerrar`, `@click="emit('cerrar')"`) — solo en los 5 modales, NO en la hoja del FAB.
+5. `storeUi.abrirModal()` / `storeUi.cerrarModal()` en `onMounted`/`onUnmounted` (oculta el bottom nav). ESTO NO SE TOCA.
+
+`DialogoConfirmacion.vue` es la excepción: NO tiene `manejarTecla`, NO tiene `onMounted`/`onUnmounted`, NO tiene botón X ni usa `storeUi`. Solo tiene `@click.self="emit('cancelar')"` en `.modal-fondo` y botones "Confirmar"/"Cancelar". Emite `cancelar` (no `cerrar`).
+
+El cambio pedido encaja de lleno en este patrón: se remueve el mecanismo de cierre por backdrop y por Escape, dejando solo el botón explícito (X / Cancelar), que ya funciona vía `emit`.
 
 ## Desviación de arquitectura
 - ¿Se necesita desviarse? **NO.**
-- No es estructural: no afecta al modelo de datos, no introduce patrones nuevos, no cambia contratos entre módulos. Es (a) sustitución de valores de variables ya existentes en un único `:root`, y (b) sumar una propiedad `padding-bottom` a una clase ya existente en un único layout. **No dispara GATE 1.**
+- Es la eliminación de dos manejadores de evento (click en backdrop y keydown/Escape) en componentes ya construidos, con patrón uniforme. No cambia estructura de carpetas, ni capas, ni modelo de datos, ni el contrato de eventos (`cerrar`/`cancelar` se siguen emitiendo desde el botón). No afecta a los padres (siguen escuchando el mismo evento). NO dispara GATE 1.
 
 ## Archivos a crear/modificar
 
-### Chunk A — Tokens (independiente)
-- `src/assets/estilos-base.css` — modificar — reemplazar SOLO el valor de estas 14 variables en el bloque `:root` (mismos nombres, sin agregar ni renombrar):
-  - `--color-fondo-app` (L8): `#f6f7f7` → `#f5f5f7`
-  - `--color-texto` (L4): `#151a18` → `#1d1d1f`
-  - `--color-texto-secundario` (L5): `#5c6663` → `#6e6e73`
-  - `--color-texto-terciario` (L6): `#8b938f` → `#86868b`
-  - `--color-primario` (L2): `#0e9384` → `#0071e3`
-  - `--color-primario-hover` (L3): `#0b7a6e` → `#0077ed`
-  - `--color-borde` (L9): `#dbe0de` → `#d2d2d7`
-  - `--color-borde-tarjeta` (L10): `#ecefee` → `#e8e8ed`
-  - `--sombra-foco` (L12): `0 0 0 3px rgba(14, 147, 132, 0.14)` → `0 0 0 3px rgba(0, 113, 227, 0.14)`
-  - `--color-error` (L13): `#b91c1c` → `#ff3b30`
-  - `--color-exito` (L15): `#15803d` → `#34c759`
-  - `--color-advertencia` (L19): `#d97706` → `#ff9500`
-  - `--fuente-base` (L38): `'Plus Jakarta Sans', system-ui, sans-serif` → `-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif`
-  - `--radio-tarjeta` (L52): `22px` → `18px`
-  - NO tocar: `--color-borde-foco` (ya es `var(--color-primario)`, hereda el azul solo), ni `--color-error-fondo`/`--color-exito-fondo`/`--color-advertencia-fondo` (fondos claros; el ajuste de matiz es opcional y NO se hace en este plan para no arriesgar contraste con el texto encima — ver Sugerencias fuera de alcance).
+### Componentes (todos son chunks independientes — no se solapan, el build puede paralelizarse)
 
-### Chunk B — Safe-area del bottom nav (independiente del Chunk A)
-- `src/layouts/AppShellLayout.vue` — modificar — en la regla `.navegacion-inferior` (L480-497), sumar el safe-area SIN reemplazar el padding vertical existente. El padding actual es `padding: var(--espacio-2) var(--espacio-4)` (top/bottom = `--espacio-2` = 8px). Para sumar el inset del home indicator al padding inferior manteniendo los 8px como mínimo, añadir una línea:
-  ```css
-  padding-bottom: calc(var(--espacio-2) + env(safe-area-inset-bottom));
-  ```
-  Colocarla DESPUÉS del shorthand `padding` (para que gane por orden de cascada) y ANTES del bloque `overflow-x`. Así en un iPhone con home indicator el nav queda separado del borde, y en pantallas sin inset `env()` resuelve a 0 y conserva los 8px originales (comportamiento idéntico al actual). Nota: el `.contenido` ya reserva `padding-bottom: 88px` (L477), no se toca.
+- `src/components/ModalGasto.vue` — modificar:
+  - Template L41: `<div class="modal-fondo" @click.self="emit('cerrar')">` → `<div class="modal-fondo">` (quitar solo el handler; conservar la clase para el estilo del overlay).
+  - Script: borrar la función `manejarTecla` completa (L23-28, incluido su JSDoc L23).
+  - `onMounted` (L30-33): quitar L31 `window.addEventListener('keydown', manejarTecla)`; conservar `storeUi.abrirModal()`.
+  - `onUnmounted` (L34-37): quitar L35 `window.removeEventListener('keydown', manejarTecla)`; conservar `storeUi.cerrarModal()`.
+  - `onMounted`/`onUnmounted` siguen usándose (por `storeUi`), así que el import de L2 se mantiene.
+  - Actualizar el JSDoc del componente (L9-10): "Cierra con clic en el backdrop, la tecla Escape o el botón de cierre." → "Cierra solo con el botón de cierre (X)."
 
-Chunks A y B no se solapan (archivos distintos) → el build puede paralelizarse.
+- `src/components/ModalIngreso.vue` — modificar: idéntico a ModalGasto. Template L36 (quitar `@click.self`), función `manejarTecla` L18-23, `addEventListener` L26, `removeEventListener` L31, JSDoc L8-9. Mantener `storeUi` y el import de L2.
+
+- `src/components/ModalCategoria.vue` — modificar: idéntico. Template L42, función L24-29, `addEventListener` L32, `removeEventListener` L36, JSDoc L9-10. Ojo: este emite además `pedir-desactivar` — NO tocar.
+
+- `src/components/ModalBanco.vue` — modificar: idéntico a ModalIngreso. Template L36, función L18-23, `addEventListener` L26, `removeEventListener` L31, JSDoc L8-9.
+
+- `src/components/ModalPresupuesto.vue` — modificar: idéntico. Template L42, función L24-29, `addEventListener` L32, `removeEventListener` L36, JSDoc L9-10. Emite además `pedir-eliminar` — NO tocar.
+
+- `src/components/HojaAccionesFab.vue` — modificar:
+  - Template L37: `<div class="hoja-fondo" @click.self="emit('cerrar')">` → `<div class="hoja-fondo">`.
+  - Borrar función `manejarTecla` L19-24.
+  - `onMounted` L26-29: quitar L27 `addEventListener`; conservar `storeUi.abrirModal()`.
+  - `onUnmounted` L30-33: quitar L31 `removeEventListener`; conservar `storeUi.cerrarModal()`.
+  - Conservar el botón "Cancelar" (`.boton-cancelar-hoja`, L45-47) que emite `cerrar` — es ahora la ÚNICA vía de cierre (esta hoja no tiene X).
+  - Actualizar JSDoc L5-9 que menciona "(backdrop/Escape)".
+
+- `src/components/DialogoConfirmacion.vue` — modificar:
+  - Template L17: `<div class="modal-fondo" @click.self="emit('cancelar')">` → `<div class="modal-fondo">`.
+  - No hay `manejarTecla` ni `onMounted`/`onUnmounted` que tocar.
+  - Conservar los botones "Confirmar"/"Cancelar" (L21-22).
+
+### Tests
+- `src/components/__tests__/DialogoConfirmacion.spec.ts` — modificar (invertir 1 caso).
+- `src/components/__tests__/HojaAccionesFab.spec.ts` — modificar (invertir 2 casos, revisar 2).
+- `src/components/__tests__/ModalGasto.spec.ts` — **crear**.
+- `src/components/__tests__/ModalIngreso.spec.ts` — **crear**.
+- `src/components/__tests__/ModalCategoria.spec.ts` — **crear**.
+- `src/components/__tests__/ModalBanco.spec.ts` — **crear**.
+- `src/components/__tests__/ModalPresupuesto.spec.ts` — **crear**.
+
+Nota: hoy NO existen specs para los 5 modales; solo hay specs para `DialogoConfirmacion` y `HojaAccionesFab`. `CategoriasView.spec.ts` y `PresupuestosView.spec.ts` referencian modales pero NO prueban cierre por backdrop/Escape (grep sin coincidencias), así que no requieren cambios por esta tarea.
 
 ## Plan de pruebas
 
-### Impacto en tests existentes (verificado)
-- **Ningún test se rompe.** Búsqueda en toda la carpeta de tests (`src/**/__tests__/**`): no existe ningún `toHaveStyle`, ni comparación contra hex hardcodeado (`#0e9384`, `#0b7a6e`, `#151a18`, etc.), ni assertion sobre `--radio-tarjeta` ni sobre `font-family`/`--fuente-base` con el valor viejo.
-- Los tests que sí tocan color lo hacen contra el **nombre de la variable**, no su valor, y solo sobre variables de categoría que NO cambian:
-  - `useColorCategoria.spec.ts`, `HistorialView.integracion.spec.ts`, `ListaGastoPorCategoria.spec.ts` → comparan contra `var(--color-categoria-*)` (tokens fuera de la tabla de cambios). Sin impacto.
-  - `TarjetaPresupuesto.spec.ts`, `TarjetaBalanceMoneda.spec.ts` → validan uso de clase / nombre de variable (`--color-texto`, `--color-primario`, `--color-error`), no el hex. Sin impacto.
-- No hace falta actualizar ningún test por el cambio de tokens.
+### Tests existentes que verifican HOY que backdrop/Escape SÍ cierran → van a fallar, hay que invertirlos
 
-### Camino feliz (validación manual/visual, ya aprobada por UX)
-- La app renderiza con la paleta azul Apple: fondo `#f5f5f7`, primario `#0071e3` en botones/logo/FAB/enlaces, tipografía del sistema (`-apple-system`), tarjetas con radio 18px. Verificar que hover de botón primario pasa a `#0077ed` y que el foco de inputs muestra el halo azul (`--sombra-foco` + `--color-borde-foco` heredado).
+- `DialogoConfirmacion.spec.ts` L32-39 — `'borde: clic en el fondo del modal también cancela (no confirma)'`: hace `find('.modal-fondo').trigger('click')` y espera `emitted('cancelar')` con longitud 1. **Invertir**: renombrar a "clic en el fondo NO cancela" y esperar que `emitted('cancelar')` sea `undefined` (y `confirmar` siga `undefined`).
 
-### Borde / error
-- Estados de error/éxito/advertencia: confirmar contraste legible del texto (`--color-error` `#ff3b30`, `--color-exito` `#34c759`, `--color-advertencia` `#ff9500`) sobre sus fondos claros SIN cambiar (`*-fondo`). Punto de atención: `#34c759` sobre `#f0fdf4` y `#ff9500` sobre `#fffbeb` son combinaciones de bajo contraste; validar visualmente que el texto sigue siendo legible (es el motivo por el que este plan NO ajusta los fondos).
+- `HojaAccionesFab.spec.ts` L49-56 — `'cierra al hacer clic en el backdrop...'`: espera `emitted('cerrar')` longitud 1. **Invertir**: "NO cierra al hacer clic en el backdrop" → esperar `emitted('cerrar')` `undefined`.
 
-### Safe-area (`env(safe-area-inset-bottom)`)
-- **jsdom NO soporta `env()` ni evalúa CSS scoped a estilo computado** — el propio test `AppShellLayout.spec.ts` (comentario L209-214) documenta que `getComputedStyle` devuelve `''` para reglas del `<style scoped>` como `overflow-x`/`flex-shrink`. Por tanto **no es verificable por cálculo de estilo en unit test**; un assertion tipo `getComputedStyle(nav).paddingBottom` daría `''` y sería un falso indicador.
-- Recomendación: **verificación por inspección del CSS fuente**, no por estilo computado. Opciones:
-  1. (Preferida, mínima) Revisión manual del diff: confirmar que `.navegacion-inferior` contiene `padding-bottom: calc(var(--espacio-2) + env(safe-area-inset-bottom))`. No agregar unit test frágil.
-  2. (Opcional) Test de humo que lea el `<style>` fuente del SFC y afirme que la cadena `env(safe-area-inset-bottom)` está presente en la regla del bottom nav (assertion sobre texto fuente, no sobre estilo renderizado). Solo si el equipo quiere un guard automatizado.
-- Validación real del comportamiento: dispositivo/emulador iPhone con home indicator (ej. iPhone 16 Pro) o DevTools con viewport que simule safe-area → el nav no debe quedar pegado al borde inferior; en desktop/pantallas sin inset el layout debe verse idéntico al actual.
+- `HojaAccionesFab.spec.ts` L67-75 — `'cierra al presionar Escape...'`: dispara `keydown` Escape y espera `emitted('cerrar')` longitud 1. **Invertir**: "NO cierra al presionar Escape" → esperar `emitted('cerrar')` `undefined`.
 
----
+### Tests existentes a revisar (premisa desactualizada, no fallan pero conviene ajustar)
 
-## Sugerencias fuera de alcance (NO incluidas en el plan; requieren decisión aparte)
-Detectadas al leer el código. NO forman parte de esta tarea porque implican tocar componentes/selectores, lo cual está explícitamente vedado. Se anotan para coherencia visual futura:
-- `AppShellLayout.vue` tiene colores del teal viejo **hardcodeados** (no usan variables), por lo que NO se actualizarán solos con este cambio y quedarán inconsistentes con el nuevo azul:
-  - L379 `.item-nav.router-link-active { color: #0b7a6e }` y L377 `background: #e2f4f1`
-  - L516 `.item-nav-movil.router-link-active { color: #0b7a6e }`
-  - L530 `.boton-fab { box-shadow: 0 4px 12px rgba(14, 147, 132, 0.35) }`
-  - También `#f1f3f2` (hover de items, L374/L470) y `rgba(21,26,24,0.06)` (sombra de `.tarjeta-auth`, L94 de estilos-base.css) siguen atados al gris/verde viejo.
-- Si UX quiere coherencia total con la paleta Apple, habría que migrar esos literales a `var(--color-primario)` / `var(--color-primario-hover)` / un token de estado activo. Eso SÍ toca selectores y componentes → tarea separada, fuera de este retoque.
+- `HojaAccionesFab.spec.ts` L58-65 — `'NO cierra al hacer clic dentro del contenido...'`: seguirá pasando, pero su descripción dice "(solo el backdrop dispara el cierre)", que ya es falso. Ajustar el texto del `it` (el backdrop ya no dispara cierre en absoluto).
+- `HojaAccionesFab.spec.ts` L77-85 — `'otras teclas no disparan el cierre'`: seguirá pasando (ninguna tecla cierra ya). Puede conservarse; opcionalmente reencuadrar como "ninguna tecla cierra la hoja" o eliminarse por redundante con el test de Escape invertido.
+
+### Tests existentes que deben seguir verdes sin cambios (botón explícito sigue cerrando)
+
+- `HojaAccionesFab.spec.ts` L87-94 — `'el botón "Cancelar" también emite cerrar'`.
+- `DialogoConfirmacion.spec.ts` L14-30 — Confirmar emite `confirmar`; Cancelar emite `cancelar` y no `confirmar`.
+
+### Tests nuevos (crear specs para los 5 modales)
+
+Para cada uno de `ModalGasto`, `ModalIngreso`, `ModalCategoria`, `ModalBanco`, `ModalPresupuesto` crear un spec con:
+
+- Camino feliz — el botón X cierra: `mount`, `find('button.modal-cerrar').trigger('click')`, esperar `emitted('cerrar')` longitud 1. Envolver en Pinia: `setActivePinia(createPinia())` en `beforeEach` (usan `useUiStore`) y `unmount` en `afterEach`. Para `ModalGasto`, `ModalCategoria` y `ModalPresupuesto` pasar la prop opcional (`gasto`/`categoria`/`presupuesto`) como `null` para el caso alta.
+- Borde — clic en el backdrop NO cierra: `find('.modal-fondo').trigger('click')`, esperar `emitted('cerrar')` `undefined`.
+- Borde — Escape NO cierra: `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))`, `await nextTick`, esperar `emitted('cerrar')` `undefined`.
+- (Opcional, refuerza el contrato con el store) al montarse `storeUi.modalAbierto === true` y al `unmount()` vuelve a `false`, como ya hace el spec de `HojaAccionesFab`.
+
+Los formularios hijos (`FormularioGasto`, etc.) pueden dejarse montar normalmente o stubearse; si montarlos requiere dependencias pesadas (stores/servicios), stubearlos con `global.stubs` para aislar la prueba del overlay.
+
+## Sugerencias fuera de alcance (NO incluidas en el build)
+- El mecanismo de cierre (backdrop + Escape + botón + `storeUi`) está duplicado casi idéntico en 6 componentes. Un composable `useOverlay()` o un componente base `<ModalBase>` reduciría la duplicación y haría que cambios como este sean de un solo punto. No se aborda ahora para mantener el alcance acotado.
+- Accesibilidad: al quitar Escape, un modal con `aria-modal="true"` idealmente debería mantener foco atrapado y foco inicial en la X. Fuera del alcance de esta tarea.
