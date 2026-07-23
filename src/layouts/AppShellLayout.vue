@@ -16,10 +16,11 @@ import { useGastosStore } from '@/stores/gastos'
 /**
  * App Shell de las secciones privadas: sidebar en escritorio (≥900px) y
  * bottom nav en móvil (<900px), ambos con acceso a Historial, Ingresos y
- * Bancos. En escritorio, "Registrar gasto"/"Registrar ingreso" abren sus
- * modales directamente; en móvil, el FAB "+" abre `HojaAccionesFab`, que a su
- * vez abre el modal elegido (Épica 11, UX). Incluye el bloque de cuenta con
- * los datos del usuario autenticado y el botón de salir.
+ * Bancos. El registro de gastos/ingresos ya no vive en el sidebar: cada
+ * vista tiene su propio botón "+ Nuevo X" que abre su modal (Historial,
+ * Ingresos); en móvil, el FAB "+" abre `HojaAccionesFab`, que a su vez abre
+ * el modal elegido (Épica 11, UX), montado aquí en el shell. Incluye el
+ * bloque de cuenta con los datos del usuario autenticado y el botón de salir.
  */
 const router = useRouter()
 const storeAuth = useAuthStore()
@@ -46,11 +47,6 @@ const nombreUsuario = computed(() => emailUsuario.value.split('@')[0] || 'Usuari
 /** Inicial para el avatar circular del bloque de cuenta. */
 const inicialUsuario = computed(() => nombreUsuario.value.charAt(0).toUpperCase())
 
-/** Abre el modal de alta de gasto directo (sidebar de escritorio). */
-function abrirModalGasto() {
-  modalGastoAbierto.value = true
-}
-
 /** Cierra el modal de alta de gasto sin guardar. */
 function cerrarModalGasto() {
   modalGastoAbierto.value = false
@@ -59,11 +55,6 @@ function cerrarModalGasto() {
 /** Tras guardar el gasto, cierra el modal (la lista se refresca sola vía store). */
 function manejarGuardadoGasto() {
   modalGastoAbierto.value = false
-}
-
-/** Abre el modal de alta de ingreso directo (sidebar de escritorio). */
-function abrirModalIngreso() {
-  modalIngresoAbierto.value = true
 }
 
 /** Cierra el modal de alta de ingreso sin guardar. */
@@ -142,12 +133,6 @@ onMounted(() => {
           </svg>
           Dashboard
         </router-link>
-        <button type="button" class="item-nav item-nav-boton" @click="abrirModalGasto">
-          <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          Registrar gasto
-        </button>
         <!-- "Egresos" es el nuevo texto visible para la ruta `historial` (gasto histórico); el name de ruta no cambia. -->
         <router-link :to="{ name: 'historial' }" class="item-nav">
           <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -191,12 +176,6 @@ onMounted(() => {
           </svg>
           Bancos
         </router-link>
-        <button type="button" class="item-nav item-nav-boton" @click="abrirModalIngreso">
-          <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          Registrar ingreso
-        </button>
       </nav>
 
       <div class="bloque-cuenta">

@@ -103,6 +103,19 @@ describe('HistorialView — eliminar gasto (HU-2.3)', () => {
     expect(wrapper.text()).not.toContain('almuerzo')
   })
 
+  it('el botón "+ Nuevo gasto" abre ModalGasto en modo alta (sin gasto prellenado)', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'ModalGasto' }).exists()).toBe(false)
+
+    await wrapper.find('.boton-nuevo').trigger('click')
+
+    const modal = wrapper.findComponent({ name: 'ModalGasto' })
+    expect(modal.exists()).toBe(true)
+    expect(modal.props('gasto')).toBeNull()
+  })
+
   it('borde: cancelar no borra nada — no se llama a delete y el gasto permanece', async () => {
     const store = useGastosStore()
 

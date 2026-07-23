@@ -290,6 +290,77 @@ describe('DashboardView', () => {
     expect(wrapper.find('[role="alert"]').text()).toBe('No se pudieron cargar los datos del dashboard.')
   })
 
+  it('Cambio 2: existe la sección "Tendencia diaria" con un GraficoTendenciaDiaria debajo de "Tendencia mensual"', async () => {
+    prepararCargaInicial([categoriaComida], [gastoDe({ moneda: 'PEN', fecha: '2026-07-05', monto: 100 })])
+
+    const wrapper = mount(DashboardView)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const secciones = wrapper.findAll('.seccion-dashboard')
+    const seccionMensual = secciones.find((s) => s.text().includes('Tendencia mensual'))!
+    const seccionDiaria = secciones.find((s) => s.text().includes('Tendencia diaria'))!
+
+    expect(seccionDiaria.exists()).toBe(true)
+    expect(secciones.indexOf(seccionDiaria)).toBeGreaterThan(secciones.indexOf(seccionMensual))
+    expect(seccionDiaria.findComponent({ name: 'GraficoTendenciaDiaria' }).exists()).toBe(true)
+  })
+
+  it('Cambio 2: un único ToggleMoneda gobierna a la vez gasto-por-categoría, tendencia mensual y tendencia diaria', async () => {
+    prepararCargaInicial(
+      [categoriaComida, categoriaTransporte],
+      [
+        gastoDe({ categoria_id: 'c1', moneda: 'PEN', fecha: '2026-07-05', monto: 100 }),
+        gastoDe({ categoria_id: 'c2', moneda: 'USD', fecha: '2026-07-06', monto: 70 }),
+      ],
+    )
+
+    const wrapper = mount(DashboardView)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findAllComponents({ name: 'ToggleMoneda' })).toHaveLength(1)
+    expect(wrapper.findComponent({ name: 'GraficoTendenciaDiaria' }).props('moneda')).toBe('PEN')
+
+    await wrapper.findComponent({ name: 'ToggleMoneda' }).vm.$emit('update:modelValue', 'USD')
+    await wrapper.vm.$nextTick()
+
+    const lista = wrapper.findComponent({ name: 'ListaGastoPorCategoria' })
+    const graficoMensual = wrapper.findComponent({ name: 'GraficoTendenciaMensual' })
+    const graficoDiario = wrapper.findComponent({ name: 'GraficoTendenciaDiaria' })
+
+    expect(lista.props('moneda')).toBe('USD')
+    expect(graficoMensual.props('moneda')).toBe('USD')
+    expect(graficoDiario.props('moneda')).toBe('USD')
+  })
+
+  it('Cambio 2: estado sin datos, la tendencia diaria renderiza sin [role=alert] (todos los días en 0)', async () => {
+    prepararCargaInicial([], [])
+
+    const wrapper = mount(DashboardView)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    const grafico = wrapper.findComponent({ name: 'GraficoTendenciaDiaria' })
+    const datos = grafico.props('datos') as Array<{ dia: string; total: number }>
+    expect(datos.every((d) => d.total === 0)).toBe(true)
+  })
+
+  it('Cambio 2: la tendencia diaria NO dispara un fetch adicional (mismo número de llamadas a from que antes)', async () => {
+    prepararCargaInicial([categoriaComida], [gastoDe({ moneda: 'PEN', fecha: '2026-07-05', monto: 100 })])
+
+    mount(DashboardView)
+    await flushPromises()
+
+    // Solo 'categorias' y 'gastos' (más, a lo sumo, 'ingresos' del propio
+    // `cargarDatosDashboard`, ya existente): cargarTendenciaDiaria es una
+    // agregación pura sobre `filas.value`, no agrega llamadas a `from`.
+    const tablasConsultadas = fromMock.mock.calls.map(([tabla]) => tabla)
+    expect(tablasConsultadas.filter((t) => t === 'gastos')).toHaveLength(1)
+    expect(new Set(tablasConsultadas).size).toBeLessThanOrEqual(3)
+  })
+
   it('riesgo: no reusa store.gastos preexistente (Historial) para sus cálculos', async () => {
     const store = useGastosStore()
     store.establecerGastos([gastoDe({ id: 'de-historial', moneda: 'PEN', fecha: '2026-07-01', monto: 99999 })])

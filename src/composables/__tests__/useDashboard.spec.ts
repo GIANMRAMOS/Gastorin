@@ -4,6 +4,7 @@ import {
   cargarResumenPorMoneda,
   cargarGastoPorCategoria,
   cargarTendenciaMensual,
+  cargarTendenciaDiaria,
   cargarBalancePorMoneda,
   useDashboard,
 } from '@/composables/useDashboard'
@@ -202,6 +203,92 @@ describe('useDashboard', () => {
       const tendencia = cargarTendenciaMensual(gastos, 'PEN')
 
       expect(tendencia.every((t) => t.total === 0)).toBe(true)
+    })
+  })
+
+  describe('cargarTendenciaDiaria (Cambio 2 — tendencia diaria del dashboard)', () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      vi.setSystemTime(new Date(2026, 6, 15)) // 15 jul 2026
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('camino feliz: devuelve exactamente 30 entradas en orden ascendente, la última es hoy, sumando por día en la moneda dada', () => {
+      const gastos = [
+        gastoDe({ moneda: 'PEN', fecha: '2026-07-15', monto: 100 }), // hoy
+        gastoDe({ moneda: 'PEN', fecha: '2026-07-15', monto: 50 }), // hoy, se suma
+        gastoDe({ moneda: 'PEN', fecha: '2026-06-16', monto: 20 }), // primer día de la ventana (30 días atrás)
+      ]
+
+      const tendencia = cargarTendenciaDiaria(gastos, 'PEN')
+
+      expect(tendencia).toHaveLength(30)
+      expect(tendencia[0].dia).toBe('2026-06-16')
+      expect(tendencia.at(-1)?.dia).toBe('2026-07-15')
+      expect(tendencia[0].total).toBe(20)
+      expect(tendencia.at(-1)?.total).toBe(150)
+    })
+
+    it('borde: un día intermedio sin gasto aparece con total 0, no se salta ni deja hueco', () => {
+      const gastos = [
+        gastoDe({ moneda: 'PEN', fecha: '2026-06-16', monto: 20 }),
+        gastoDe({ moneda: 'PEN', fecha: '2026-07-15', monto: 100 }),
+      ]
+
+      const tendencia = cargarTendenciaDiaria(gastos, 'PEN')
+      const diaIntermedio = tendencia.find((t) => t.dia === '2026-07-01')
+
+      expect(diaIntermedio).toEqual({ dia: '2026-07-01', total: 0 })
+    })
+
+    it('borde: ignora gastos de otra moneda', () => {
+      const gastos = [gastoDe({ moneda: 'USD', fecha: '2026-07-15', monto: 9999 })]
+
+      const tendencia = cargarTendenciaDiaria(gastos, 'PEN')
+
+      expect(tendencia.every((t) => t.total === 0)).toBe(true)
+    })
+
+    it('borde: un gasto fuera de la ventana (31+ días atrás) no entra; uno de hoy sí', () => {
+      const gastos = [
+        gastoDe({ moneda: 'PEN', fecha: '2026-06-10', monto: 9999 }), // 35 días atrás, fuera de ventana
+        gastoDe({ moneda: 'PEN', fecha: '2026-07-15', monto: 100 }), // hoy
+      ]
+
+      const tendencia = cargarTendenciaDiaria(gastos, 'PEN')
+
+      expect(tendencia.some((t) => t.dia === '2026-06-10')).toBe(false)
+      expect(tendencia.at(-1)?.total).toBe(100)
+    })
+
+    it('borde: el parámetro `dias` cambia el tamaño de la ventana', () => {
+      const tendencia = cargarTendenciaDiaria([], 'PEN', 7)
+
+      expect(tendencia).toHaveLength(7)
+      expect(tendencia.at(-1)?.dia).toBe('2026-07-15')
+    })
+
+    it('borde: sin gastos, devuelve 30 entradas todas con total 0', () => {
+      const tendencia = cargarTendenciaDiaria([], 'PEN')
+
+      expect(tendencia).toHaveLength(30)
+      expect(tendencia.every((t) => t.total === 0)).toBe(true)
+    })
+
+    it('cruce de mes/año: con hoy = 2026-01-05, la ventana incluye días de diciembre 2025 con el YYYY-MM-DD correcto', () => {
+      vi.setSystemTime(new Date(2026, 0, 5)) // 5 ene 2026
+
+      const gastos = [gastoDe({ moneda: 'PEN', fecha: '2025-12-20', monto: 30 })]
+      const tendencia = cargarTendenciaDiaria(gastos, 'PEN')
+
+      expect(tendencia).toHaveLength(30)
+      expect(tendencia[0].dia).toBe('2025-12-07')
+      expect(tendencia.at(-1)?.dia).toBe('2026-01-05')
+      const diaConGasto = tendencia.find((t) => t.dia === '2025-12-20')
+      expect(diaConGasto?.total).toBe(30)
     })
   })
 

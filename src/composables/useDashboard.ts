@@ -7,6 +7,9 @@ import type { Ingreso } from '@/types/ingreso'
 /** Cantidad de meses (incluido el actual) que cubre la ventana de la tendencia mensual. */
 const MESES_VENTANA_TENDENCIA = 6
 
+/** Cantidad de días (incluido hoy) que cubre la ventana de la tendencia diaria. */
+const DIAS_VENTANA_TENDENCIA_DIARIA = 30
+
 /**
  * Devuelve el primer día (`YYYY-MM-01`) del mes actual menos `mesesAtras`
  * meses (0 = mes actual). Aritmética local a este composable: el Dashboard
@@ -25,6 +28,22 @@ function primerDiaDeMesRelativo(mesesAtras: number): string {
 /** Devuelve el prefijo `YYYY-MM` del mes actual menos `mesesAtras` meses (0 = mes actual). */
 function prefijoMesRelativo(mesesAtras: number): string {
   return primerDiaDeMesRelativo(mesesAtras).slice(0, 7)
+}
+
+/**
+ * Devuelve la fecha `YYYY-MM-DD` de hoy menos `diasAtras` días (0 = hoy).
+ * Aritmética local (mismo estilo que `primerDiaDeMesRelativo`): usa
+ * `getFullYear/getMonth/getDate` en vez de manipular strings, para que el
+ * cruce de mes/año se resuelva solo (evita el desfase de zona horaria de
+ * `toISOString()`, que convierte a UTC).
+ */
+function fechaDiaRelativo(diasAtras: number): string {
+  const ahora = new Date()
+  const fecha = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate() - diasAtras)
+  const anio = fecha.getFullYear()
+  const mes = String(fecha.getMonth() + 1).padStart(2, '0')
+  const dia = String(fecha.getDate()).padStart(2, '0')
+  return `${anio}-${mes}-${dia}`
 }
 
 /**
@@ -102,6 +121,32 @@ export function cargarTendenciaMensual(
       .filter((g) => g.moneda === moneda && g.fecha.slice(0, 7) === mesPrefijo)
       .reduce((totalAcumulado, g) => totalAcumulado + (g.monto ?? 0), 0)
     tendencia.push({ mes: mesPrefijo, total })
+  }
+
+  return tendencia
+}
+
+/**
+ * Devuelve el total gastado en `moneda` de los últimos `dias` (incluyendo
+ * hoy), en orden cronológico ascendente (el último elemento es hoy). Los
+ * días sin gasto aparecen con `total: 0` (no se descartan, para que el
+ * gráfico no tenga huecos), análogo a `cargarTendenciaMensual` pero
+ * agrupando por día `YYYY-MM-DD` en vez de por mes. No hace fetch nuevo: la
+ * ventana de 30 días cae dentro de los 6 meses ya cargados en `filas`.
+ */
+export function cargarTendenciaDiaria(
+  gastos: Gasto[],
+  moneda: Moneda,
+  dias = DIAS_VENTANA_TENDENCIA_DIARIA,
+): Array<{ dia: string; total: number }> {
+  const tendencia: Array<{ dia: string; total: number }> = []
+
+  for (let diasAtras = dias - 1; diasAtras >= 0; diasAtras--) {
+    const dia = fechaDiaRelativo(diasAtras)
+    const total = gastos
+      .filter((g) => g.moneda === moneda && g.fecha.slice(0, 10) === dia)
+      .reduce((totalAcumulado, g) => totalAcumulado + (g.monto ?? 0), 0)
+    tendencia.push({ dia, total })
   }
 
   return tendencia

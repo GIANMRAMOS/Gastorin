@@ -4,12 +4,14 @@ import TarjetaResumenMoneda from '@/components/TarjetaResumenMoneda.vue'
 import TarjetaBalanceMoneda from '@/components/TarjetaBalanceMoneda.vue'
 import ListaGastoPorCategoria from '@/components/ListaGastoPorCategoria.vue'
 import GraficoTendenciaMensual from '@/components/GraficoTendenciaMensual.vue'
+import GraficoTendenciaDiaria from '@/components/GraficoTendenciaDiaria.vue'
 import ToggleMoneda from '@/components/ToggleMoneda.vue'
 import {
   useDashboard,
   cargarResumenPorMoneda,
   cargarGastoPorCategoria,
   cargarTendenciaMensual,
+  cargarTendenciaDiaria,
   cargarBalancePorMoneda,
 } from '@/composables/useDashboard'
 import { useCategorias } from '@/composables/useCategorias'
@@ -18,10 +20,11 @@ import type { Moneda } from '@/types/gasto'
 
 /**
  * Dashboard (Épica 7): resumen del mes por moneda (HU-7.1, siempre ambas
- * monedas), gasto por categoría (HU-7.2), tendencia mensual (HU-7.3) —estas
- * dos últimas gobernadas por un único `ToggleMoneda` compartido— y balance
- * neto por moneda (Épica 11, HU-11.4). Es la nueva home de la app (ruta raíz
- * redirige aquí, ver `router/index.ts`).
+ * monedas), gasto por categoría (HU-7.2), tendencia mensual (HU-7.3) y
+ * tendencia diaria de los últimos 30 días —estas tres últimas gobernadas por
+ * un único `ToggleMoneda` compartido— y balance neto por moneda (Épica 11,
+ * HU-11.4). Es la nueva home de la app (ruta raíz redirige aquí, ver
+ * `router/index.ts`).
  */
 const { filas, filasIngresos, cargarDatosDashboard } = useDashboard()
 const { cargarCategorias } = useCategorias()
@@ -62,6 +65,9 @@ const gastoPorCategoria = computed(() => {
 
 /** Tendencia de los últimos 6 meses en la moneda seleccionada. */
 const tendenciaMensual = computed(() => cargarTendenciaMensual(filas.value, monedaSeleccionada.value))
+
+/** Tendencia de los últimos 30 días en la moneda seleccionada (misma ventana de `filas`, sin fetch nuevo). */
+const tendenciaDiaria = computed(() => cargarTendenciaDiaria(filas.value, monedaSeleccionada.value))
 </script>
 
 <template>
@@ -127,6 +133,11 @@ const tendenciaMensual = computed(() => cargarTendenciaMensual(filas.value, mone
     <section class="seccion-dashboard">
       <h2>Tendencia mensual</h2>
       <GraficoTendenciaMensual :datos="tendenciaMensual" :moneda="monedaSeleccionada" />
+    </section>
+
+    <section class="seccion-dashboard">
+      <h2>Tendencia diaria</h2>
+      <GraficoTendenciaDiaria :datos="tendenciaDiaria" :moneda="monedaSeleccionada" />
     </section>
   </main>
 </template>

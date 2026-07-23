@@ -155,24 +155,43 @@ describe('AppShellLayout — orden de menú (Épica 11, ajuste de alcance)', () 
     wrapperActivo = null
   })
 
-  it('sidebar de escritorio: orden exacto Dashboard, Registrar gasto, Egresos, Ingresos, Bandeja, Presupuestos, Categorías, Bancos, Registrar ingreso', async () => {
+  it('sidebar de escritorio: orden exacto Dashboard, Egresos, Ingresos, Bandeja, Presupuestos, Categorías, Bancos (sin botones de registro)', async () => {
     const wrapper = await montarShell()
     const nav = wrapper.find('nav.navegacion')
-    const items = nav.findAll('.item-nav, .item-nav-boton')
+    const items = nav.findAll('.item-nav')
 
     expect(items.map((i) => i.text())).toEqual([
       'Dashboard',
-      'Registrar gasto',
       'Egresos',
       'Ingresos',
       'Bandeja',
       'Presupuestos',
       'Categorías',
       'Bancos',
-      'Registrar ingreso',
     ])
     // La ruta interna sigue llamándose "historial"; solo cambió el texto visible a "Egresos".
-    expect(nav.findAll('.item-nav')[2].attributes('href')).toBe('/historial')
+    expect(nav.findAll('.item-nav')[1].attributes('href')).toBe('/historial')
+  })
+
+  it('el sidebar YA NO contiene botones "Registrar gasto"/"Registrar ingreso"', async () => {
+    const wrapper = await montarShell()
+    const nav = wrapper.find('nav.navegacion')
+
+    expect(nav.findAll('.item-nav-boton')).toHaveLength(0)
+    expect(nav.text()).not.toContain('Registrar gasto')
+    expect(nav.text()).not.toContain('Registrar ingreso')
+  })
+
+  it('regresión: el FAB móvil sigue siendo vía de registro (elegir en la hoja monta ModalGasto/ModalIngreso)', async () => {
+    const wrapper = await montarShell()
+
+    await wrapper.find('.boton-fab').trigger('click')
+    expect(wrapper.findComponent({ name: 'HojaAccionesFab' }).exists()).toBe(true)
+
+    await wrapper.find('.opcion-hoja').trigger('click')
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findComponent({ name: 'ModalGasto' }).exists()).toBe(true)
   })
 
   it('bottom nav móvil: mismas rutas en el mismo orden relativo (Dashboard, Egresos, Ingresos, Bandeja, Presupuestos, Categorías, Bancos), con FAB y Salir al final', async () => {
@@ -338,12 +357,11 @@ describe('AppShellLayout — fix: bancos/categorías se cargan al montar el shel
     wrapperActivo = null
   })
 
-  /** Abre "Nuevo gasto" desde el botón directo del sidebar (equivalente desktop al FAB móvil). */
+  /** Abre "Nuevo gasto" vía el FAB móvil + `HojaAccionesFab` (único camino que queda tras quitar el botón del sidebar). */
   async function abrirNuevoGasto(wrapper: VueWrapper) {
-    const botonGasto = wrapper
-      .findAll('.item-nav-boton')
-      .find((boton) => boton.text() === 'Registrar gasto')!
-    await botonGasto.trigger('click')
+    await wrapper.find('.boton-fab').trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.opcion-hoja').trigger('click')
     await wrapper.vm.$nextTick()
   }
 
