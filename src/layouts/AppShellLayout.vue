@@ -374,8 +374,8 @@ onMounted(() => {
 }
 
 .item-nav.router-link-active {
-  background: #e2f4f1;
-  color: #0b7a6e;
+  background: rgba(0, 113, 227, 0.12);
+  color: var(--color-primario);
 }
 
 .icono-nav {
@@ -489,6 +489,7 @@ onMounted(() => {
   background: var(--color-fondo);
   border-top: 1px solid var(--color-borde-tarjeta);
   padding: var(--espacio-2) var(--espacio-4);
+  padding-bottom: calc(var(--espacio-2) + env(safe-area-inset-bottom));
   z-index: 50;
   /* Con 7 rutas + Salir + FAB + versión, el bottom nav no entra en pantallas
      angostas: se permite scroll horizontal contenido en vez de recortar ítems. */
@@ -512,7 +513,7 @@ onMounted(() => {
 }
 
 .item-nav-movil.router-link-active {
-  color: #0b7a6e;
+  color: var(--color-primario);
 }
 
 .boton-fab {
@@ -527,7 +528,7 @@ onMounted(() => {
   justify-content: center;
   cursor: pointer;
   margin-top: -24px;
-  box-shadow: 0 4px 12px rgba(14, 147, 132, 0.35);
+  box-shadow: 0 4px 12px rgba(0, 113, 227, 0.35);
   flex-shrink: 0;
 }
 .boton-fab:hover {
