@@ -33,6 +33,22 @@ describe('TarjetaResumenMoneda (HU-7.1)', () => {
     expect(variacion.text()).toContain('60.0%')
   })
 
+  it('prop etiqueta (Dashboard 3x2): con etiqueta="Ingresos este mes" se muestra ese texto', () => {
+    const wrapper = mount(TarjetaResumenMoneda, {
+      props: { moneda: 'PEN', total: 500, variacionPct: null, etiqueta: 'Ingresos este mes' },
+    })
+
+    expect(wrapper.find('.etiqueta-resumen').text()).toBe('Ingresos este mes')
+  })
+
+  it('borde: sin pasar la prop etiqueta, el default sigue siendo "Gastado este mes" (no rompe la fila 1)', () => {
+    const wrapper = mount(TarjetaResumenMoneda, {
+      props: { moneda: 'PEN', total: 100, variacionPct: null },
+    })
+
+    expect(wrapper.find('.etiqueta-resumen').text()).toBe('Gastado este mes')
+  })
+
   it('borde: variacionPct null (moneda sin gastos este mes) no muestra flecha, solo "Sin variación"', () => {
     const wrapper = mount(TarjetaResumenMoneda, {
       props: { moneda: 'USD', total: 0, variacionPct: null },

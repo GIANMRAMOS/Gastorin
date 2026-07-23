@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import ModalGasto from '@/components/ModalGasto.vue'
 import ModalIngreso from '@/components/ModalIngreso.vue'
 import HojaAccionesFab from '@/components/HojaAccionesFab.vue'
+import TextoVersion from '@/components/TextoVersion.vue'
 import { useAuth } from '@/composables/useAuth'
 import { useVersion } from '@/composables/useVersion'
 import { useAuthStore } from '@/stores/auth'
@@ -28,8 +29,6 @@ const { textoVersion, commitCompleto } = useVersion()
 const modalGastoAbierto = ref(false)
 const modalIngresoAbierto = ref(false)
 const hojaAbierta = ref(false)
-/** Confirmación breve "Copiado" tras copiar el hash de commit al portapapeles. */
-const commitCopiado = ref(false)
 
 /** Cantidad de borradores pendientes de confirmar, para el badge del ítem "Bandeja". */
 const cantidadBorradores = computed(() => storeGastos.borradores.length)
@@ -103,15 +102,6 @@ async function manejarSalir() {
   }
 }
 
-/** Copia el hash de commit completo al portapapeles y muestra una confirmación breve. */
-async function copiarCommit() {
-  if (!commitCompleto) return
-  await navigator.clipboard.writeText(commitCompleto)
-  commitCopiado.value = true
-  setTimeout(() => {
-    commitCopiado.value = false
-  }, 2000)
-}
 </script>
 
 <template>
@@ -132,11 +122,24 @@ async function copiarCommit() {
           </svg>
           Dashboard
         </router-link>
+        <button type="button" class="item-nav item-nav-boton" @click="abrirModalGasto">
+          <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Registrar gasto
+        </button>
+        <!-- "Egresos" es el nuevo texto visible para la ruta `historial` (gasto histórico); el name de ruta no cambia. -->
         <router-link :to="{ name: 'historial' }" class="item-nav">
           <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
           </svg>
-          Historial
+          Egresos
+        </router-link>
+        <router-link :to="{ name: 'ingresos' }" class="item-nav">
+          <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 19V5M5 12l7-7 7 7" />
+          </svg>
+          Ingresos
         </router-link>
         <router-link :to="{ name: 'bandeja' }" class="item-nav">
           <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -146,13 +149,6 @@ async function copiarCommit() {
           Bandeja
           <span v-if="cantidadBorradores > 0" class="insignia-nav">{{ cantidadBorradores }}</span>
         </router-link>
-        <router-link :to="{ name: 'categorias' }" class="item-nav">
-          <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M20.59 13.41 12 22 2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z" />
-            <circle cx="7" cy="7" r="1.5" fill="currentColor" stroke="none" />
-          </svg>
-          Categorías
-        </router-link>
         <router-link :to="{ name: 'presupuestos' }" class="item-nav">
           <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="4" width="18" height="16" rx="2" />
@@ -161,11 +157,12 @@ async function copiarCommit() {
           </svg>
           Presupuestos
         </router-link>
-        <router-link :to="{ name: 'ingresos' }" class="item-nav">
+        <router-link :to="{ name: 'categorias' }" class="item-nav">
           <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 19V5M5 12l7-7 7 7" />
+            <path d="M20.59 13.41 12 22 2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z" />
+            <circle cx="7" cy="7" r="1.5" fill="currentColor" stroke="none" />
           </svg>
-          Ingresos
+          Categorías
         </router-link>
         <router-link :to="{ name: 'bancos' }" class="item-nav">
           <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -174,12 +171,6 @@ async function copiarCommit() {
           </svg>
           Bancos
         </router-link>
-        <button type="button" class="item-nav item-nav-boton" @click="abrirModalGasto">
-          <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          Registrar gasto
-        </button>
         <button type="button" class="item-nav item-nav-boton" @click="abrirModalIngreso">
           <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 5v14M5 12h14" />
@@ -201,17 +192,7 @@ async function copiarCommit() {
         </button>
       </div>
 
-      <p class="texto-version">
-        <template v-if="commitCompleto">
-          <button type="button" class="hash-commit" title="Copiar hash de commit" @click="copiarCommit">
-            {{ textoVersion }}
-          </button>
-          <span v-if="commitCopiado" class="confirmacion-copiado">Copiado</span>
-        </template>
-        <template v-else>
-          {{ textoVersion }}
-        </template>
-      </p>
+      <TextoVersion :texto-version="textoVersion" :commit-completo="commitCompleto" />
     </aside>
 
     <main class="contenido">
@@ -228,11 +209,18 @@ async function copiarCommit() {
         </svg>
         Dashboard
       </router-link>
+      <!-- "Egresos" es el nuevo texto visible para la ruta `historial`; el name de ruta no cambia. -->
       <router-link :to="{ name: 'historial' }" class="item-nav-movil">
         <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
         </svg>
-        Historial
+        Egresos
+      </router-link>
+      <router-link :to="{ name: 'ingresos' }" class="item-nav-movil">
+        <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 19V5M5 12l7-7 7 7" />
+        </svg>
+        Ingresos
       </router-link>
       <router-link :to="{ name: 'bandeja' }" class="item-nav-movil">
         <span class="envoltorio-icono-movil">
@@ -244,13 +232,6 @@ async function copiarCommit() {
         </span>
         Bandeja
       </router-link>
-      <router-link :to="{ name: 'categorias' }" class="item-nav-movil">
-        <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M20.59 13.41 12 22 2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z" />
-          <circle cx="7" cy="7" r="1.5" fill="currentColor" stroke="none" />
-        </svg>
-        Categorías
-      </router-link>
       <router-link :to="{ name: 'presupuestos' }" class="item-nav-movil">
         <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="4" width="18" height="16" rx="2" />
@@ -258,6 +239,20 @@ async function copiarCommit() {
           <path d="M8 15h4" />
         </svg>
         Presupuestos
+      </router-link>
+      <router-link :to="{ name: 'categorias' }" class="item-nav-movil">
+        <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.59 13.41 12 22 2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z" />
+          <circle cx="7" cy="7" r="1.5" fill="currentColor" stroke="none" />
+        </svg>
+        Categorías
+      </router-link>
+      <router-link :to="{ name: 'bancos' }" class="item-nav-movil">
+        <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="6" width="18" height="14" rx="2" />
+          <path d="M3 10h18" />
+        </svg>
+        Bancos
       </router-link>
       <button type="button" class="boton-fab" title="Registrar" @click="abrirHoja">
         <svg class="icono-fab" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
@@ -270,6 +265,7 @@ async function copiarCommit() {
         </svg>
         Salir
       </button>
+      <TextoVersion :texto-version="textoVersion" :commit-completo="commitCompleto" class="texto-version-movil" />
     </nav>
 
     <ModalGasto
@@ -455,35 +451,6 @@ async function copiarCommit() {
   color: var(--color-error);
 }
 
-.texto-version {
-  margin: var(--espacio-2) 0 0;
-  padding: 0 var(--espacio-3);
-  font-size: var(--tamano-pequeno);
-  color: var(--color-texto-terciario);
-  display: flex;
-  align-items: center;
-  gap: var(--espacio-2);
-}
-
-.hash-commit {
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
-  font: inherit;
-  color: inherit;
-  cursor: pointer;
-}
-
-.hash-commit:hover {
-  color: var(--color-texto-secundario);
-}
-
-.confirmacion-copiado {
-  color: var(--color-primario);
-  font-weight: 600;
-}
-
 .contenido {
   flex: 1;
   min-width: 0;
@@ -498,10 +465,15 @@ async function copiarCommit() {
   display: flex;
   align-items: center;
   justify-content: space-around;
+  gap: var(--espacio-2);
   background: var(--color-fondo);
   border-top: 1px solid var(--color-borde-tarjeta);
   padding: var(--espacio-2) var(--espacio-4);
   z-index: 50;
+  /* Con 7 rutas + Salir + FAB + versión, el bottom nav no entra en pantallas
+     angostas: se permite scroll horizontal contenido en vez de recortar ítems. */
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .item-nav-movil {
@@ -516,6 +488,7 @@ async function copiarCommit() {
   border: none;
   cursor: pointer;
   font-family: var(--fuente-base);
+  flex-shrink: 0;
 }
 
 .item-nav-movil.router-link-active {
@@ -535,9 +508,18 @@ async function copiarCommit() {
   cursor: pointer;
   margin-top: -24px;
   box-shadow: 0 4px 12px rgba(14, 147, 132, 0.35);
+  flex-shrink: 0;
 }
 .boton-fab:hover {
   background: var(--color-primario-hover);
+}
+
+.texto-version-movil {
+  flex-shrink: 0;
+  padding: 0;
+  margin: 0;
+  font-size: 0.65rem;
+  white-space: nowrap;
 }
 
 .icono-fab {

@@ -6,6 +6,7 @@ import { useGastosStore } from '@/stores/gastos'
 import { supabase } from '@/lib/supabaseClient'
 import { crearConstructorConsulta } from '@/lib/__mocks__/supabaseClient'
 import type { Categoria, Gasto } from '@/types/gasto'
+import type { Ingreso } from '@/types/ingreso'
 
 const fromMock = supabase.from as unknown as Mock
 
@@ -49,6 +50,20 @@ function gastoDe(datos: Partial<Gasto>): Gasto {
   }
 }
 
+function ingresoDe(datos: Partial<Ingreso>): Ingreso {
+  return {
+    id: `i-${Math.random()}`,
+    usuario_id: 'u1',
+    banco_id: 'b1',
+    fecha: '2026-07-10',
+    moneda: 'PEN',
+    importe: 100,
+    concepto: 'Sueldo',
+    created_at: '',
+    ...datos,
+  }
+}
+
 /** `onMounted` llama a `cargarCategorias` y `cargarDatosDashboard`, en ese orden. */
 function prepararCargaInicial(categorias: Categoria[], gastos: Gasto[]) {
   const builderCategorias = crearConstructorConsulta()
@@ -79,7 +94,7 @@ describe('DashboardView', () => {
     expect(fromMock).toHaveBeenCalledWith('gastos')
   })
 
-  it('HU-7.1: muestra SIEMPRE las dos tarjetas de resumen (PEN y USD), independiente del toggle', async () => {
+  it('HU-7.1: muestra SIEMPRE las dos tarjetas de resumen de gasto (PEN y USD), independiente del toggle', async () => {
     prepararCargaInicial(
       [categoriaComida],
       [
@@ -92,11 +107,111 @@ describe('DashboardView', () => {
     await flushPromises()
     await wrapper.vm.$nextTick()
 
-    const tarjetas = wrapper.findAllComponents({ name: 'TarjetaResumenMoneda' })
+    // Acotado a la sección "Gastado este mes": el Dashboard 3x2 ahora tiene 4
+    // instancias de TarjetaResumenMoneda en total (gasto + ingresos).
+    const seccionGastado = wrapper.get('section[aria-label="Gastado este mes"]')
+    const tarjetas = seccionGastado.findAllComponents({ name: 'TarjetaResumenMoneda' })
     expect(tarjetas).toHaveLength(2)
-    expect(tarjetas.map((t) => t.props('moneda')).sort()).toEqual(['PEN', 'USD'])
-    expect(tarjetas.find((t) => t.props('moneda') === 'PEN')?.props('total')).toBe(150)
-    expect(tarjetas.find((t) => t.props('moneda') === 'USD')?.props('total')).toBe(40)
+    expect(tarjetas.map((t: any) => t.props('moneda')).sort()).toEqual(['PEN', 'USD'])
+    expect(tarjetas.find((t: any) => t.props('moneda') === 'PEN')?.props('total')).toBe(150)
+    expect(tarjetas.find((t: any) => t.props('moneda') === 'USD')?.props('total')).toBe(40)
+  })
+
+  it('Dashboard 3x2: la fila "Ingresos este mes" muestra 2 TarjetaResumenMoneda con los ingresos por moneda y sin variación', async () => {
+    const builderCategorias = crearConstructorConsulta()
+    const builderGastos = crearConstructorConsulta()
+    const builderIngresos = crearConstructorConsulta()
+    fromMock
+      .mockReturnValueOnce(builderCategorias)
+      .mockReturnValueOnce(builderGastos)
+      .mockReturnValueOnce(builderIngresos)
+    ;(builderCategorias.order as Mock).mockResolvedValueOnce({ data: [categoriaComida], error: null })
+    ;(builderGastos.order as Mock).mockResolvedValueOnce({ data: [], error: null })
+    ;(builderIngresos.order as Mock).mockResolvedValueOnce({
+      data: [
+        ingresoDe({ fecha: '2026-07-05', moneda: 'PEN', importe: 500 }),
+        ingresoDe({ fecha: '2026-07-06', moneda: 'USD', importe: 80 }),
+      ],
+      error: null,
+    })
+
+    const wrapper = mount(DashboardView)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const seccionIngresos = wrapper.get('section[aria-label="Ingresos este mes"]')
+    const tarjetas = seccionIngresos.findAllComponents({ name: 'TarjetaResumenMoneda' })
+    expect(tarjetas).toHaveLength(2)
+    expect(tarjetas.every((t: any) => t.props('etiqueta') === 'Ingresos este mes')).toBe(true)
+    expect(tarjetas.every((t: any) => t.props('variacionPct') === null)).toBe(true)
+    expect(tarjetas.find((t: any) => t.props('moneda') === 'PEN')?.props('total')).toBe(500)
+    expect(tarjetas.find((t: any) => t.props('moneda') === 'USD')?.props('total')).toBe(80)
+
+    const seccionBalance = wrapper.get('section[aria-label="Balance este mes"]')
+    expect(seccionBalance.findAllComponents({ name: 'TarjetaBalanceMoneda' })).toHaveLength(2)
+  })
+
+  it('Dashboard 3x2 con datos reales de ambas fuentes: "Ingresos este mes" muestra ingresos (no gastos por error de copy-paste) y "Balance" es ingresos−gastos correcto por moneda', async () => {
+    const builderCategorias = crearConstructorConsulta()
+    const builderGastos = crearConstructorConsulta()
+    const builderIngresos = crearConstructorConsulta()
+    fromMock
+      .mockReturnValueOnce(builderCategorias)
+      .mockReturnValueOnce(builderGastos)
+      .mockReturnValueOnce(builderIngresos)
+    ;(builderCategorias.order as Mock).mockResolvedValueOnce({ data: [categoriaComida], error: null })
+    ;(builderGastos.order as Mock).mockResolvedValueOnce({
+      data: [
+        gastoDe({ moneda: 'PEN', fecha: '2026-07-05', monto: 300 }),
+        gastoDe({ moneda: 'USD', fecha: '2026-07-06', monto: 25 }),
+      ],
+      error: null,
+    })
+    ;(builderIngresos.order as Mock).mockResolvedValueOnce({
+      data: [
+        ingresoDe({ fecha: '2026-07-01', moneda: 'PEN', importe: 1200 }),
+        ingresoDe({ fecha: '2026-07-02', moneda: 'USD', importe: 50 }),
+      ],
+      error: null,
+    })
+
+    const wrapper = mount(DashboardView)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    // Fila "Gastado este mes": debe reflejar los GASTOS, no los ingresos.
+    const seccionGastado = wrapper.get('section[aria-label="Gastado este mes"]')
+    const tarjetasGasto = seccionGastado.findAllComponents({ name: 'TarjetaResumenMoneda' })
+    expect(tarjetasGasto.find((t: any) => t.props('moneda') === 'PEN')?.props('total')).toBe(300)
+    expect(tarjetasGasto.find((t: any) => t.props('moneda') === 'USD')?.props('total')).toBe(25)
+
+    // Fila "Ingresos este mes": debe reflejar los INGRESOS, NUNCA el total de gastos
+    // (riesgo explícito de copy-paste de props entre secciones).
+    const seccionIngresos = wrapper.get('section[aria-label="Ingresos este mes"]')
+    const tarjetasIngreso = seccionIngresos.findAllComponents({ name: 'TarjetaResumenMoneda' })
+    const ingresoPen = tarjetasIngreso.find((t: any) => t.props('moneda') === 'PEN')
+    const ingresoUsd = tarjetasIngreso.find((t: any) => t.props('moneda') === 'USD')
+    expect(ingresoPen?.props('total')).toBe(1200)
+    expect(ingresoUsd?.props('total')).toBe(50)
+    expect(ingresoPen?.props('total')).not.toBe(300) // no coló el total de gastos PEN
+    expect(ingresoUsd?.props('total')).not.toBe(25) // no coló el total de gastos USD
+
+    // Fila "Balance este mes": ingresos − gastos, exacto y separado por moneda.
+    const seccionBalance = wrapper.get('section[aria-label="Balance este mes"]')
+    const tarjetasBalance = seccionBalance.findAllComponents({ name: 'TarjetaBalanceMoneda' })
+    const balancePen = tarjetasBalance.find((t: any) => t.props('moneda') === 'PEN')
+    const balanceUsd = tarjetasBalance.find((t: any) => t.props('moneda') === 'USD')
+
+    expect(balancePen?.props('ingresos')).toBe(1200)
+    expect(balancePen?.props('gastos')).toBe(300)
+    expect(balancePen?.props('balance')).toBe(900) // 1200 - 300
+
+    expect(balanceUsd?.props('ingresos')).toBe(50)
+    expect(balanceUsd?.props('gastos')).toBe(25)
+    expect(balanceUsd?.props('balance')).toBe(25) // 50 - 25
+
+    // Nunca se mezclan monedas: el balance PEN no debe filtrarse al de USD ni viceversa.
+    expect(balancePen?.props('balance')).not.toBe(balanceUsd?.props('balance'))
   })
 
   it('HU-7.2/HU-7.3: un único ToggleMoneda cambia a la vez el gasto por categoría y la tendencia mensual', async () => {

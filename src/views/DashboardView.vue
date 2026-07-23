@@ -70,17 +70,37 @@ const tendenciaMensual = computed(() => cargarTendenciaMensual(filas.value, mone
 
     <p v-if="store.error" role="alert" class="mensaje-error">{{ store.error }}</p>
 
-    <section class="seccion-resumen" aria-label="Resumen del mes por moneda">
+    <section class="seccion-resumen" aria-label="Gastado este mes">
       <TarjetaResumenMoneda
         moneda="PEN"
+        etiqueta="Gastado este mes"
         :total="resumenPorMoneda.PEN.total"
         :variacion-pct="resumenPorMoneda.PEN.variacionPct"
       />
       <TarjetaResumenMoneda
         moneda="USD"
+        etiqueta="Gastado este mes"
         :total="resumenPorMoneda.USD.total"
         :variacion-pct="resumenPorMoneda.USD.variacionPct"
       />
+    </section>
+
+    <section class="seccion-resumen" aria-label="Ingresos este mes">
+      <TarjetaResumenMoneda
+        moneda="PEN"
+        etiqueta="Ingresos este mes"
+        :total="balancePorMoneda.PEN.ingresos"
+        :variacion-pct="null"
+      />
+      <TarjetaResumenMoneda
+        moneda="USD"
+        etiqueta="Ingresos este mes"
+        :total="balancePorMoneda.USD.ingresos"
+        :variacion-pct="null"
+      />
+    </section>
+
+    <section class="seccion-resumen" aria-label="Balance este mes">
       <TarjetaBalanceMoneda
         moneda="PEN"
         :ingresos="balancePorMoneda.PEN.ingresos"

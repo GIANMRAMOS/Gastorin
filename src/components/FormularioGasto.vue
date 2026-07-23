@@ -27,11 +27,22 @@ const emit = defineEmits<{
 const esEdicion = computed(() => props.gasto != null)
 const esOrigenCorreo = computed(() => props.gasto?.origen === 'correo')
 
+/** Fecha de hoy en `YYYY-MM-DD` **local** (nunca `toISOString()`, que corrige a UTC y puede mostrar el día siguiente/anterior). */
+function hoyISO(): string {
+  const ahora = new Date()
+  const anio = ahora.getFullYear()
+  const mes = String(ahora.getMonth() + 1).padStart(2, '0')
+  const dia = String(ahora.getDate()).padStart(2, '0')
+  return `${anio}-${mes}-${dia}`
+}
+
 const monto = ref(props.gasto ? String(props.gasto.monto) : '')
-const moneda = ref<Moneda | ''>(props.gasto?.moneda ?? '')
+// En alta, la moneda arranca en PEN (default); en edición, respeta la del gasto.
+const moneda = ref<Moneda | ''>(props.gasto?.moneda ?? 'PEN')
 const categoriaId = ref(props.gasto?.categoria_id ?? '')
 const bancoId = ref(props.gasto?.banco_id ?? '')
-const fecha = ref(props.gasto?.fecha ?? '')
+// En alta, la fecha arranca en hoy; en edición (incluida origen correo) respeta la del gasto.
+const fecha = ref(props.gasto?.fecha ?? hoyISO())
 const descripcion = ref(props.gasto?.descripcion ?? '')
 
 const errorValidacion = ref<string | null>(null)

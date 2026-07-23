@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, type Mock } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import FormularioGasto from '@/components/FormularioGasto.vue'
@@ -76,13 +76,141 @@ describe('FormularioGasto', () => {
       const wrapper = montarFormulario(null)
       const select = wrapper.find('#moneda')
 
-      expect((select.element as HTMLSelectElement).value).toBe('')
+      // Default de alta (chunk A): la moneda arranca en 'PEN', no vacía.
+      expect((select.element as HTMLSelectElement).value).toBe('PEN')
 
       await select.setValue('USD')
       expect((select.element as HTMLSelectElement).value).toBe('USD')
 
       await select.setValue('PEN')
       expect((select.element as HTMLSelectElement).value).toBe('PEN')
+    })
+  })
+
+  describe('defaults de alta (chunk A): moneda PEN y fecha de hoy', () => {
+    beforeEach(() => {
+      // Solo se falsea `Date` (no `setTimeout`), para no interferir con el
+      // `await new Promise((r) => setTimeout(r, 0))` que usan estos tests.
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date(2026, 6, 22)) // 22 jul 2026 (fecha local, no UTC)
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('camino feliz: en modo alta, #moneda arranca en PEN y #fecha en la fecha de hoy (local); ambos editables', async () => {
+      const store = useGastosStore()
+      store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
+
+      const wrapper = montarFormulario(null)
+
+      expect((wrapper.find('#moneda').element as HTMLSelectElement).value).toBe('PEN')
+      expect((wrapper.find('#fecha').element as HTMLInputElement).value).toBe('2026-07-22')
+      expect(wrapper.find('#moneda').attributes('disabled')).toBeUndefined()
+      expect(wrapper.find('#fecha').attributes('disabled')).toBeUndefined()
+
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      const gastoCreado: Gasto = { ...gastoManual, id: 'g-nuevo' }
+      ;(builder.single as Mock).mockResolvedValueOnce({ data: gastoCreado, error: null })
+
+      await wrapper.find('#monto').setValue('45.50')
+      await wrapper.find('#categoria').setValue('c1')
+      await wrapper.find('#banco').setValue('b1')
+      await wrapper.find('#moneda').setValue('USD')
+      await wrapper.find('#fecha').setValue('2026-07-01')
+      await wrapper.find('form').trigger('submit.prevent')
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(builder.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ moneda: 'USD', fecha: '2026-07-01' }),
+      )
+    })
+
+    it('borde: en modo edición, el default de alta NO pisa el valor del gasto (moneda y fecha del gasto)', async () => {
+      const store = useGastosStore()
+      store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
+
+      const wrapper = montarFormulario(gastoManual)
+
+      expect((wrapper.find('#moneda').element as HTMLSelectElement).value).toBe(gastoManual.moneda)
+      expect((wrapper.find('#fecha').element as HTMLInputElement).value).toBe(gastoManual.fecha)
+    })
+
+    it('borde: en edición de un gasto en USD, el default PEN de alta NO lo resetea (sigue en USD)', async () => {
+      const store = useGastosStore()
+      store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
+
+      const gastoUsd: Gasto = { ...gastoManual, id: 'g-usd', moneda: 'USD', fecha: '2026-05-15' }
+      const wrapper = montarFormulario(gastoUsd)
+
+      // El "hoy" falseado es 2026-07-22; si el default de alta pisara el
+      // valor de edición, moneda pasaría a 'PEN' y/o fecha a '2026-07-22'.
+      expect((wrapper.find('#moneda').element as HTMLSelectElement).value).toBe('USD')
+      expect((wrapper.find('#fecha').element as HTMLInputElement).value).toBe('2026-05-15')
+
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      ;(builder.single as Mock).mockResolvedValueOnce({ data: gastoUsd, error: null })
+
+      await wrapper.find('form').trigger('submit.prevent')
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(builder.update).toHaveBeenCalledWith(
+        expect.objectContaining({ moneda: 'USD', fecha: '2026-05-15' }),
+      )
+    })
+  })
+
+  describe('defaults de fecha (hoyISO): nunca se corre de día por usar hora LOCAL en vez de toISOString/UTC', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('borde crítico: a las 23:30 hora local (Lima, UTC-5), #fecha sigue siendo el día local, no el día siguiente en UTC', async () => {
+      // 22 jul 2026, 23:30 hora local: en UTC ya son las 04:30 del 23 jul.
+      // `toISOString()` mostraría erróneamente "2026-07-23".
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date(2026, 6, 22, 23, 30))
+
+      const store = useGastosStore()
+      store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
+
+      const wrapper = montarFormulario(null)
+
+      expect((wrapper.find('#fecha').element as HTMLInputElement).value).toBe('2026-07-22')
+    })
+
+    it('borde crítico: 31-dic 23:50 hora local no se corre al año/mes siguiente en UTC', async () => {
+      // 31 dic 2026, 23:50 hora local: en UTC ya es 1 ene 2027, 04:50.
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date(2026, 11, 31, 23, 50))
+
+      const store = useGastosStore()
+      store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
+
+      const wrapper = montarFormulario(null)
+
+      expect((wrapper.find('#fecha').element as HTMLInputElement).value).toBe('2026-12-31')
+    })
+
+    it('borde: justo a medianoche hora local (00:00:00) también da la fecha local correcta', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date(2026, 6, 22, 0, 0, 0))
+
+      const store = useGastosStore()
+      store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
+
+      const wrapper = montarFormulario(null)
+
+      expect((wrapper.find('#fecha').element as HTMLInputElement).value).toBe('2026-07-22')
     })
   })
 
@@ -182,6 +310,9 @@ describe('FormularioGasto', () => {
 
       const wrapper = montarFormulario(null)
       await wrapper.find('#monto').setValue('45.50')
+      // Con el default 'PEN' del alta, hay que vaciar el campo explícitamente
+      // para seguir cubriendo la validación "falta moneda".
+      await wrapper.find('#moneda').setValue('')
       await wrapper.find('#categoria').setValue('c1')
       await wrapper.find('#banco').setValue('b1')
       await wrapper.find('#fecha').setValue('2026-07-20')

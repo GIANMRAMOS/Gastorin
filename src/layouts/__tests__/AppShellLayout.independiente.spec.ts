@@ -10,7 +10,8 @@ import { useVersion } from '@/composables/useVersion'
  * Validación INDEPENDIENTE de HU-9.1 (Épica 9), separada de
  * `AppShellLayout.spec.ts` de dev-builder. Se enfoca en dos afirmaciones
  * puntuales que el describe del builder no verifica explícitamente:
- * 1) el texto de versión NO se renderiza en absoluto en el bottom-nav móvil.
+ * 1) el texto de versión SÍ se renderiza también en el bottom-nav móvil
+ *    (ajuste de alcance confirmado: antes vivía solo en el sidebar).
  * 2) al copiar, se pasa a `writeText` exactamente el valor de `commitCompleto`
  *    devuelto por el composable (sin recortarlo de nuevo en el componente).
  */
@@ -43,7 +44,7 @@ async function montarShell() {
   })
 }
 
-describe('AppShellLayout — versión NO debe aparecer en el bottom-nav móvil (HU-9.1, independiente)', () => {
+describe('AppShellLayout — versión SÍ debe aparecer también en el bottom-nav móvil (HU-9.1, independiente)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.mocked(useVersion).mockReturnValue({
@@ -56,22 +57,23 @@ describe('AppShellLayout — versión NO debe aparecer en el bottom-nav móvil (
     document.body.innerHTML = ''
   })
 
-  it('el bottom-nav (.navegacion-inferior) no contiene .texto-version ni el texto de versión', async () => {
+  it('el bottom-nav (.navegacion-inferior) SÍ contiene .texto-version con el texto de versión', async () => {
     const wrapper = await montarShell()
     const bottomNav = wrapper.find('nav.navegacion-inferior')
 
     expect(bottomNav.exists()).toBe(true)
-    expect(bottomNav.find('.texto-version').exists()).toBe(false)
-    expect(bottomNav.text()).not.toContain('marcador0')
-    expect(bottomNav.text()).not.toContain('v9.9.9')
+    expect(bottomNav.find('.texto-version').exists()).toBe(true)
+    expect(bottomNav.text()).toContain('marcador0')
+    expect(bottomNav.text()).toContain('v9.9.9')
   })
 
-  it('el texto de versión solo existe una vez en todo el documento (dentro del aside)', async () => {
+  it('el texto de versión existe dos veces en el documento: una en el aside y otra en el bottom-nav', async () => {
     const wrapper = await montarShell()
     const ocurrencias = wrapper.findAll('.texto-version')
 
-    expect(ocurrencias.length).toBe(1)
+    expect(ocurrencias.length).toBe(2)
     expect(wrapper.find('aside.barra-lateral .texto-version').exists()).toBe(true)
+    expect(wrapper.find('nav.navegacion-inferior .texto-version').exists()).toBe(true)
   })
 })
 

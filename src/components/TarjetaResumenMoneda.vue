@@ -8,11 +8,18 @@ import type { Moneda } from '@/types/gasto'
  * porcentual contra el mes anterior. Presentacional puro: recibe ya
  * calculados `total` y `variacionPct` desde `DashboardView`.
  */
-const props = defineProps<{
-  moneda: Moneda
-  total: number
-  variacionPct: number | null
-}>()
+const props = withDefaults(
+  defineProps<{
+    moneda: Moneda
+    total: number
+    variacionPct: number | null
+    /** Etiqueta superior de la tarjeta (permite reusarla para "Ingresos este mes", etc.). */
+    etiqueta?: string
+  }>(),
+  {
+    etiqueta: 'Gastado este mes',
+  },
+)
 
 const { formatearMonto } = useMoneda()
 
@@ -36,7 +43,7 @@ const variacionTexto = computed(() => {
 
 <template>
   <article class="tarjeta-resumen-moneda">
-    <p class="etiqueta-resumen">Gastado este mes</p>
+    <p class="etiqueta-resumen">{{ etiqueta }}</p>
     <p class="monto-resumen">{{ totalFormateado }}</p>
     <p
       v-if="sentidoVariacion"
