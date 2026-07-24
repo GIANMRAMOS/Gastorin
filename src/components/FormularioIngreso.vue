@@ -3,18 +3,27 @@ import { computed, ref } from 'vue'
 import ToggleMoneda from '@/components/ToggleMoneda.vue'
 import { useIngresos } from '@/composables/useIngresos'
 import { useIngresosStore } from '@/stores/ingresos'
-import type { IngresoInput } from '@/types/ingreso'
+import type { Ingreso, IngresoInput } from '@/types/ingreso'
 import type { Moneda } from '@/types/gasto'
 
 /**
- * Formulario de alta de ingreso (Épica 11, HU-11.2). Solo cubre alta (sin
- * modo edición: no está en las HU actuales). Los bancos se leen de
- * `useIngresosStore` (cargados por la vista contenedora vía `useBancos`).
+ * Formulario único compartido por alta y edición de ingresos (Épica 11,
+ * HU-11.2/11.3). Si `ingreso` viene definido, arranca en modo edición
+ * prellenado; si no, arranca en modo alta. A diferencia de gastos, Ingreso
+ * no tiene concepto de `origen === 'correo'`: todos los campos son siempre
+ * editables en ambos modos. Los bancos se leen de `useIngresosStore`
+ * (cargados por la vista contenedora vía `useBancos`).
  */
+const props = defineProps<{
+  ingreso?: Ingreso | null
+}>()
+
 const emit = defineEmits<{
   guardado: []
   cerrar: []
 }>()
+
+const esEdicion = computed(() => props.ingreso != null)
 
 /** Fecha de hoy en `YYYY-MM-DD` **local** (nunca `toISOString()`, que corrige a UTC y puede mostrar el día siguiente/anterior). */
 function hoyISO(): string {
@@ -25,16 +34,16 @@ function hoyISO(): string {
   return `${anio}-${mes}-${dia}`
 }
 
-const fecha = ref(hoyISO())
-const bancoId = ref('')
-const moneda = ref<Moneda | ''>('PEN')
-const importe = ref('')
-const concepto = ref('')
+const fecha = ref(props.ingreso?.fecha ?? hoyISO())
+const bancoId = ref(props.ingreso?.banco_id ?? '')
+const moneda = ref<Moneda | ''>(props.ingreso?.moneda ?? 'PEN')
+const importe = ref(props.ingreso ? String(props.ingreso.importe) : '')
+const concepto = ref(props.ingreso?.concepto ?? '')
 
 const errorValidacion = ref<string | null>(null)
 
 const storeIngresos = useIngresosStore()
-const { crearIngreso } = useIngresos()
+const { crearIngreso, editarIngreso } = useIngresos()
 
 /** No hay bancos cargados: hay que bloquear el guardado (patrón "sin categorías"). */
 const sinBancos = computed(() => storeIngresos.bancos.length === 0)
@@ -46,8 +55,8 @@ function validarFormulario(): boolean {
     return false
   }
   const importeNumerico = Number(importe.value)
-  if (!importe.value.trim() || Number.isNaN(importeNumerico) || importeNumerico <= 0) {
-    errorValidacion.value = 'Ingresa un importe válido mayor a 0.'
+  if (!importe.value.trim() || Number.isNaN(importeNumerico) || importeNumerico === 0) {
+    errorValidacion.value = 'El importe no puede ser cero.'
     return false
   }
   if (!bancoId.value) {
@@ -70,7 +79,7 @@ function validarFormulario(): boolean {
   return true
 }
 
-/** Envía el formulario: crea el ingreso. */
+/** Envía el formulario: crea o edita el ingreso según el modo actual. */
 async function manejarEnvio() {
   storeIngresos.limpiarError()
   if (!validarFormulario()) {
@@ -84,7 +93,11 @@ async function manejarEnvio() {
     importe: Number(importe.value),
     concepto: concepto.value.trim(),
   }
-  const exito = await crearIngreso(input)
+
+  const exito =
+    esEdicion.value && props.ingreso
+      ? await editarIngreso(props.ingreso.id, input)
+      : await crearIngreso(input)
 
   if (exito) {
     emit('guardado')

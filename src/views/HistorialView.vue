@@ -25,7 +25,7 @@ const { cargarBancos } = useBancos()
 const { colorCategoria: colorPorNombre } = useColorCategoria()
 const storeGastos = useGastosStore()
 const storeIngresos = useIngresosStore()
-const { formatearMonto } = useMoneda()
+const { formatearMonto, resumenMonedaPredominante } = useMoneda()
 
 const modalAbierto = ref(false)
 const gastoEnEdicion = ref<Gasto | null>(null)
@@ -104,6 +104,17 @@ const sinResultadosPorFiltro = computed(
   () => !sinGastos.value && gastosFiltrados.value.length === 0,
 )
 
+/**
+ * Totalizador de la moneda predominante sobre el conjunto ya filtrado. Los
+ * gastos confirmados nunca tienen `monto`/`moneda` en `null` (mismo guard que
+ * `montoFormateado`); el `!` solo replica esa garantía existente.
+ */
+const resumenGastos = computed(() =>
+  resumenMonedaPredominante(
+    gastosFiltrados.value.map((gasto) => ({ moneda: gasto.moneda!, monto: gasto.monto! })),
+  ),
+)
+
 /** Abre el modal en modo alta. */
 function abrirModalAlta() {
   gastoEnEdicion.value = null
@@ -166,6 +177,10 @@ async function confirmarEliminacion() {
       :bancos="storeIngresos.bancos"
       :meses-disponibles="mesesDisponibles"
     />
+
+    <p v-if="resumenGastos" class="resumen-totalizador">
+      Total {{ formatearMonto(resumenGastos.total, resumenGastos.moneda) }}
+    </p>
 
     <ul v-if="gastosFiltrados.length > 0" class="lista-gastos">
       <li v-for="gasto in gastosFiltrados" :key="gasto.id" class="fila-gasto">
@@ -341,5 +356,11 @@ async function confirmarEliminacion() {
   color: var(--color-texto-terciario);
   font-size: var(--tamano-pequeno);
   margin: 0;
+}
+
+.resumen-totalizador {
+  margin: 0 0 var(--espacio-3);
+  font-weight: 700;
+  color: var(--color-texto);
 }
 </style>

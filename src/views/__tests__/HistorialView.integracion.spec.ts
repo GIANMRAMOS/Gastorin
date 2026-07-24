@@ -371,3 +371,65 @@ describe('HistorialView — estado vacío por filtro (HU-3.4)', () => {
     expect(wrapper.find('.estado-vacio-filtro').exists()).toBe(false)
   })
 })
+
+describe('HistorialView — totalizador de moneda predominante', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockearCargaInicial()
+  })
+
+  it('sin filtro (fixture con mayoría PEN: 2 PEN + 1 USD): el totalizador muestra el total en PEN de los visibles', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    // Cine (25.5 PEN) + Taxi (8 PEN) = 33.5; Varios (12 USD) no cuenta.
+    expect(wrapper.find('.resumen-totalizador').text()).toContain('S/')
+    expect(wrapper.find('.resumen-totalizador').text()).toContain('33.50')
+  })
+
+  it('filtro "$ Dólares": el totalizador muestra el total en USD del subconjunto filtrado, no del total sin filtrar', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    await wrapper.findAll('.chip-moneda').find((c) => c.text() === '$ Dólares')!.trigger('click')
+
+    expect(wrapper.find('.resumen-totalizador').text()).toContain('$')
+    expect(wrapper.find('.resumen-totalizador').text()).toContain('12.00')
+  })
+
+  it('empate tras filtrar (1 PEN + 1 USD): el total mostrado es el del PEN', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    // Filtrando por categoría "otro" o "ocio" deja 1 PEN + 1 USD de julio; se filtra por mes julio para dejar Cine (PEN) y Varios (USD).
+    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('2026-07')
+
+    expect(wrapper.findAll('.fila-gasto')).toHaveLength(2) // Cine (PEN) y Varios (USD)
+    expect(wrapper.find('.resumen-totalizador').text()).toContain('S/')
+    expect(wrapper.find('.resumen-totalizador').text()).toContain('25.50')
+  })
+
+  it('conjunto filtrado vacío: el totalizador no se renderiza (aparece el estado vacío por filtro en su lugar)', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    await wrapper.findAll('.chip-moneda').find((c) => c.text() === '$ Dólares')!.trigger('click')
+    await wrapper.find('select[aria-label="Filtrar por categoría"]').setValue('ocio')
+
+    expect(wrapper.find('.resumen-totalizador').exists()).toBe(false)
+    expect(wrapper.find('.estado-vacio-filtro').exists()).toBe(true)
+  })
+
+  it('el total se recalcula al cambiar el filtro', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    const totalInicial = wrapper.find('.resumen-totalizador').text()
+
+    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('2026-06')
+
+    const totalTrasFiltrar = wrapper.find('.resumen-totalizador').text()
+    expect(totalTrasFiltrar).not.toBe(totalInicial)
+    expect(totalTrasFiltrar).toContain('8.00') // Solo Taxi (PEN) queda en junio
+  })
+})

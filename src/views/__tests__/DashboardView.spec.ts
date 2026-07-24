@@ -373,7 +373,7 @@ describe('DashboardView', () => {
     mount(DashboardView)
     await flushPromises()
 
-    // Solo 'categorias' y 'gastos' (más, a lo sumo, 'ingresos' del propio
+    // Solo 'categorias', 'gastos' e 'ingresos' (esta última del propio
     // `cargarDatosDashboard`, ya existente): cargarTendenciaDiaria es una
     // agregación pura sobre `filas.value`, no agrega llamadas a `from`.
     const tablasConsultadas = fromMock.mock.calls.map(([tabla]) => tabla)

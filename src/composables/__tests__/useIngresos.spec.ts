@@ -122,13 +122,11 @@ describe('useIngresos (HU-11.2 / HU-11.3)', () => {
       expect(store.ingresos).toEqual([])
     })
 
-    it('borde Gherkin — importe negativo: mismo comportamiento, el composable llama a Supabase igualmente (el bloqueo real ocurre en el formulario) y traduce el error', async () => {
+    it('camino feliz — importe negativo: la BD ahora lo acepta (CHECK importe <> 0), el composable inserta y agrega al store', async () => {
       const builder = crearConstructorConsulta()
       fromMock.mockReturnValueOnce(builder)
-      ;(builder.single as Mock).mockResolvedValueOnce({
-        data: null,
-        error: { code: '23514', message: 'check constraint violated' },
-      })
+      const ingresoCreado = { ...ingresoBase, importe: -50 }
+      ;(builder.single as Mock).mockResolvedValueOnce({ data: ingresoCreado, error: null })
 
       const authStore = useAuthStore()
       authStore.establecerUsuario({ id: 'u1', email: 'a@a.com' } as never)
@@ -137,8 +135,10 @@ describe('useIngresos (HU-11.2 / HU-11.3)', () => {
       const store = useIngresosStore()
       const exito = await crearIngreso({ ...inputBase, importe: -50 })
 
-      expect(exito).toBe(false)
-      expect(store.error).toBe('No se pudo guardar el ingreso.')
+      expect(exito).toBe(true)
+      expect(builder.insert).toHaveBeenCalledWith({ ...inputBase, importe: -50, usuario_id: 'u1' })
+      expect(store.ingresos).toEqual([ingresoCreado])
+      expect(store.error).toBeNull()
     })
 
     it('borde: payload sin banco_id (vacío) igual llega al insert tal cual — la validación de bloqueo real vive en FormularioIngreso, no aquí', async () => {
@@ -193,6 +193,94 @@ describe('useIngresos (HU-11.2 / HU-11.3)', () => {
       expect(store.error).toBe('No hay una sesión activa. Vuelve a iniciar sesión.')
       expect(fromMock).not.toHaveBeenCalled()
       expect(store.ingresos).toEqual([])
+    })
+  })
+
+  describe('editarIngreso (HU-11.3)', () => {
+    it('camino feliz: actualiza por id y reemplaza el ingreso en el store', async () => {
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      const ingresoActualizado: Ingreso = {
+        ...ingresoBase,
+        importe: 250,
+        concepto: 'Bono',
+        fecha: '2026-07-15',
+      }
+      ;(builder.single as Mock).mockResolvedValueOnce({ data: ingresoActualizado, error: null })
+
+      const store = useIngresosStore()
+      store.agregarIngreso(ingresoBase)
+
+      const { editarIngreso } = useIngresos()
+      const input: IngresoInput = {
+        banco_id: 'b1',
+        fecha: '2026-07-15',
+        moneda: 'PEN',
+        importe: 250,
+        concepto: 'Bono',
+      }
+      const exito = await editarIngreso('i1', input)
+
+      expect(exito).toBe(true)
+      expect(builder.update).toHaveBeenCalledWith(input)
+      expect(builder.eq).toHaveBeenCalledWith('id', 'i1')
+      expect(store.ingresos[0]).toEqual(ingresoActualizado)
+      expect(store.error).toBeNull()
+    })
+
+    it('borde: error de Supabase al actualizar deja mensaje en español y no toca el store', async () => {
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      ;(builder.single as Mock).mockResolvedValueOnce({
+        data: null,
+        error: { message: 'boom' },
+      })
+
+      const store = useIngresosStore()
+      store.agregarIngreso(ingresoBase)
+
+      const { editarIngreso } = useIngresos()
+      const exito = await editarIngreso('i1', { concepto: 'no debería aplicarse' })
+
+      expect(exito).toBe(false)
+      expect(store.error).toBe('No se pudo actualizar el ingreso.')
+      expect(store.ingresos[0]).toEqual(ingresoBase)
+    })
+  })
+
+  describe('eliminarIngreso (HU-11.4)', () => {
+    it('camino feliz: elimina por id y quita el ingreso del store', async () => {
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      ;(builder.eq as Mock).mockResolvedValueOnce({ error: null })
+
+      const store = useIngresosStore()
+      store.agregarIngreso(ingresoBase)
+
+      const { eliminarIngreso } = useIngresos()
+      const exito = await eliminarIngreso('i1')
+
+      expect(exito).toBe(true)
+      expect(fromMock).toHaveBeenCalledWith('ingresos')
+      expect(builder.delete).toHaveBeenCalled()
+      expect(builder.eq).toHaveBeenCalledWith('id', 'i1')
+      expect(store.ingresos).toHaveLength(0)
+    })
+
+    it('borde: error de Supabase al eliminar deja el ingreso en el store y setea el mensaje', async () => {
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      ;(builder.eq as Mock).mockResolvedValueOnce({ error: { message: 'boom' } })
+
+      const store = useIngresosStore()
+      store.agregarIngreso(ingresoBase)
+
+      const { eliminarIngreso } = useIngresos()
+      const exito = await eliminarIngreso('i1')
+
+      expect(exito).toBe(false)
+      expect(store.error).toBe('No se pudo eliminar el ingreso.')
+      expect(store.ingresos).toHaveLength(1)
     })
   })
 })

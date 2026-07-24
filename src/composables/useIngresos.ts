@@ -9,7 +9,7 @@ const MENSAJE_SIN_SESION = 'No hay una sesión activa. Vuelve a iniciar sesión.
 /**
  * Composable que encapsula las llamadas a Supabase para ingresos (Épica 11).
  * Ninguna vista debe llamar a Supabase directamente: siempre a través de aquí.
- * Solo cubre alta + listado (sin editar/eliminar): las HU 11.2/11.3 no lo piden.
+ * Cubre alta, listado, edición y eliminación (HU 11.1–11.4).
  */
 export function useIngresos() {
   const store = useIngresosStore()
@@ -63,8 +63,49 @@ export function useIngresos() {
     }
   }
 
+  /** Edita un ingreso existente. Todos los campos de `IngresoInput` son siempre editables. */
+  async function editarIngreso(id: string, input: Partial<IngresoInput>) {
+    store.establecerCargando(true)
+    store.limpiarError()
+    try {
+      const { data, error } = await supabase
+        .from('ingresos')
+        .update(input)
+        .eq('id', id)
+        .select()
+        .single()
+      if (error) {
+        store.establecerError('No se pudo actualizar el ingreso.')
+        return false
+      }
+      store.actualizarIngreso(data as Ingreso)
+      return true
+    } finally {
+      store.establecerCargando(false)
+    }
+  }
+
+  /** Elimina definitivamente un ingreso por su id. */
+  async function eliminarIngreso(id: string) {
+    store.establecerCargando(true)
+    store.limpiarError()
+    try {
+      const { error } = await supabase.from('ingresos').delete().eq('id', id)
+      if (error) {
+        store.establecerError('No se pudo eliminar el ingreso.')
+        return false
+      }
+      store.quitarIngreso(id)
+      return true
+    } finally {
+      store.establecerCargando(false)
+    }
+  }
+
   return {
     cargarIngresos,
     crearIngreso,
+    editarIngreso,
+    eliminarIngreso,
   }
 }

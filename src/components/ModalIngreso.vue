@@ -2,12 +2,18 @@
 import { onMounted, onUnmounted } from 'vue'
 import FormularioIngreso from '@/components/FormularioIngreso.vue'
 import { useUiStore } from '@/stores/ui'
+import type { Ingreso } from '@/types/ingreso'
 
 /**
- * Envoltorio de modal/overlay para el alta de ingreso (Épica 11, HU-11.2),
- * mismo patrón que `ModalGasto.vue`. Cierra solo con el botón de cierre (X).
- * Sin modo edición.
+ * Envoltorio de modal/overlay para el formulario de ingreso (alta o edición,
+ * Épica 11, HU-11.2/11.3), mismo patrón que `ModalGasto.vue`. No es una ruta
+ * aparte: la vista controla su apertura con `v-if`. Cierra solo con el
+ * botón de cierre (X).
  */
+defineProps<{
+  ingreso?: Ingreso | null
+}>()
+
 const emit = defineEmits<{
   cerrar: []
   guardado: []
@@ -27,12 +33,12 @@ onUnmounted(() => {
   <div class="modal-fondo">
     <div class="modal-contenido" role="dialog" aria-modal="true">
       <div class="modal-cabecera">
-        <h2>Nuevo ingreso</h2>
+        <h2>{{ ingreso ? 'Editar ingreso' : 'Nuevo ingreso' }}</h2>
         <button type="button" class="modal-cerrar" aria-label="Cerrar" @click="emit('cerrar')">
           &times;
         </button>
       </div>
-      <FormularioIngreso @guardado="emit('guardado')" @cerrar="emit('cerrar')" />
+      <FormularioIngreso :ingreso="ingreso" @guardado="emit('guardado')" @cerrar="emit('cerrar')" />
     </div>
   </div>
 </template>

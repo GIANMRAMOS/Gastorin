@@ -1,74 +1,105 @@
-# Micro-plan — Rediseño Dashboard: fila única de 3 tarjetas con insignia USD
+# Micro-plan — Desglose de saldo NETO por banco en la tarjeta "Balance" del Dashboard
+
+> Sobrescribe un `dev-plan.md` previo (tarea "nota sin banco asignado", ya cerrada).
 
 ## Patrón arquitectónico detectado
-- **Capas.** `DashboardView.vue` es el contenedor con estado: consume `useDashboard`, `useCategorias`, `useGastosStore` y los helpers puros `cargarResumenPorMoneda` / `cargarBalancePorMoneda` (en `composables/useDashboard`). Calcula todo vía `computed` y pasa datos ya listos por props. `TarjetaResumenMoneda.vue` y `TarjetaBalanceMoneda.vue` son **presentacionales puros**: reciben números formateables y no tocan store ni composables de datos (solo `useMoneda` para formatear).
-- **Formateo de moneda.** Centralizado en `useMoneda().formatearMonto(monto, moneda)`. `Moneda` es un tipo (`'PEN' | 'USD'`) en `@/types/gasto`. El proyecto hoy solo maneja esas dos monedas.
-- **Estilos.** CSS scoped por componente + tokens globales en `src/assets/estilos-base.css` (`--espacio-*`, `--tamano-pequeno`, `--color-texto-terciario`, `--color-borde-tarjeta`, `--color-fondo`, `--color-primario`, `--color-error`, `--color-exito`). Las tarjetas usan `.tarjeta-*` con `display:flex; flex-direction:column`. El grid contenedor vive en la vista (`.seccion-resumen`), no en las tarjetas.
-- **Convenciones.** Nombres en español; props con `defineProps<>()`; comentarios JSDoc por prop/computed; tests con Vitest + `@vue/test-utils`, consultando por `findAllComponents({ name })` y `props(...)`.
+
+Arquitectura Vue 3 + TypeScript + Pinia con separación clara de capas:
+
+- **Funciones puras de agregación** viven exportadas a nivel de módulo dentro de los composables de dominio (`cargarResumenPorMoneda`, `cargarGastoPorCategoria`, `cargarBalancePorMoneda`, etc. en `useDashboard.ts`). Reciben datos crudos + `mes`, NO tocan Supabase ni el store, y NO resuelven nombres (nombre de categoría/banco es responsabilidad de la vista). Testeadas de forma aislada en `useDashboard.spec.ts`.
+- **`useDashboard()`** es el composable de dominio del Dashboard: hace el fetch de la ventana de 6 meses de `gastos` (confirmados) e `ingresos` en refs locales (`filas`, `filasIngresos`) y no depende de que otra página se haya visitado.
+- **`useMoneda.ts`** es un composable puro de formateo + agregación **solo de ingresos** por banco (`saldosPorBanco`, `montoSinBancoPorMoneda`). Documentado explícitamente como "sin estado ni store"; hoy NO conoce gastos.
+- **La vista (`DashboardView.vue`)** orquesta: llama a las funciones puras dentro de `computed`, resuelve nombres contra los stores y pasa todo ya calculado como props a componentes presentacionales.
+- **Resolución de nombre de banco**: el precedente exacto está en `IngresosView.vue` — un helper local `nombreBanco(bancoId)` que lee `storeIngresos.bancos.find(...)?.nombre ?? 'Sin banco'`, y luego mapea los items añadiendo `nombreBanco` antes de pasarlos a la función pura `saldosPorBanco` (que excluye "No especificado" por nombre, case-insensitive).
+- **Componentes presentacionales puros**: `TarjetaBalanceMoneda.vue` ya declara en su docstring "Presentacional puro: recibe ya calculados los totales desde DashboardView". Importa `useMoneda().formatearMonto` (permitido: es formateo puro, no store), y no accede a ningún Pinia store.
+- **Ubicación de `banco_id`**: presente y obligatorio tanto en `Gasto` (`types/gasto.ts:52`) como en `Ingreso` (`types/ingreso.ts:23`). El catálogo `bancos` vive en `useIngresosStore().bancos` (compartido gastos+ingresos), se carga con `useBancos().cargarBancos()`.
 
 ## Desviación de arquitectura
-- ¿Se necesita desviarse? **NO.**
-- Son cambios de **props + template + CSS** en 2 componentes presentacionales ya existentes, más la **reestructuración del grid contenedor** en la vista. No se tocan composables, store, tipos, ni el modelo de datos. `cargarResumenPorMoneda` y `cargarBalancePorMoneda` ya devuelven ambos montos (PEN y USD): solo cambia cómo la vista los reparte a las tarjetas (antes 6 instancias, ahora 3). No dispara GATE 1.
 
-## Decisión sobre los props (pregunta 2)
-**Preservar la genericidad, no hardcodear PEN/USD.** Razones:
-- Los componentes hoy son genéricos por `moneda` y sus tests lo verifican (formateo `S/` vs `$`, separación de monedas). Hardcodear PEN adentro rompería esa genericidad por una ganancia nula: pasar `moneda="PEN"` desde la vista cuesta una línea.
-- La insignia secundaria debe formatearse con `formatearMonto`, que ya necesita una `Moneda`. Pasar `monedaSecundaria="USD"` reusa la misma ruta de formateo sin casos especiales. Hardcodear `USD` en el template ataría el componente al par PEN/USD justo cuando su única dependencia real es `formatearMonto`.
+- **¿Se necesita desviarse? NO.**
+- La feature encaja limpiamente en el patrón existente: nueva función pura de agregación en el composable de dominio + resolución de nombres en la vista + render en el componente presentacional vía una prop nueva. No cambia el modelo de datos, no introduce un patrón nuevo, no crea acoplamiento entre módulos. **No dispara GATE 1.**
+- Único ajuste transversal menor (dentro del patrón, no desviación): el Dashboard hoy no carga el catálogo de bancos; hay que añadir `useBancos().cargarBancos()` en su `onMounted`, exactamente como ya lo hace `IngresosView.vue`.
 
-**Contrato de props resultante (aditivo, retrocompatible):**
+## Decisión 1 — Dónde vive la función de agregación nueva
 
-`TarjetaResumenMoneda`:
-- Mantiene `moneda: Moneda` (= la principal, `'PEN'` en este uso), `total`, `variacionPct`, `etiqueta?`.
-- Añade `montoSecundario?: number` y `monedaSecundaria?: Moneda` (ambos opcionales). La insignia se renderiza solo si `monedaSecundaria` está definida (o `montoSecundario !== undefined`). Así los tests/usos sin insignia no se rompen.
+**Va en `useDashboard.ts`**, como función pura exportada `cargarBalanceNetoPorBanco`, junto a `cargarBalancePorMoneda`.
 
-`TarjetaBalanceMoneda`:
-- Mantiene `moneda`, `ingresos`, `gastos`, `balance`.
-- Añade `montoSecundario?: number` y `monedaSecundaria?: Moneda` (= balance en la moneda secundaria). Misma regla de render condicional.
+Justificación:
+- `cargarBalancePorMoneda` ya vive ahí y ya combina las dos fuentes (`gastos` + `ingresos`) del mes restando una de otra. La nueva función es su hermana natural: misma combinación, pero desagregada por banco.
+- La ventana mensual de ambas fuentes (`filas`, `filasIngresos`) se origina en `useDashboard`. Es el dueño del dato.
+- `useMoneda.ts` está documentado como "sin estado ni store" y **solo agrega ingresos**; `saldosPorBanco` suma montos de una sola fuente sin signo. Meter lógica gasto-aware (resta con signo) ahí rompería su alcance declarado y su semántica ("saldos de Ingresos").
+- **Descartado reutilizar `saldosPorBanco` con montos firmados** (ingresos +, gastos −): funcionaría por coincidencia (el group-by banco+moneda y la exclusión de "No especificado" son idénticos), pero sería un hack semántico oculto — su docstring dice "suma los montos … de Ingresos" y ningún lector futuro esperaría que le pasen gastos negativos. Preferimos una función dedicada y bien nombrada.
 
-La insignia es **informativa y sin interacción**: un `<span>`/`<p>` con texto formateado, sin `router-link`, `button` ni handlers; subordinada visualmente (menor tamaño, color secundario/terciario, tipo "chip").
+Firma propuesta (pura, sin store, siguiendo el precedente de `saldosPorBanco` en cuanto a exclusión por nombre):
+
+```ts
+export function cargarBalanceNetoPorBanco(
+  gastos: Gasto[],
+  ingresos: Ingreso[],
+  mes: string,                                // prefijo YYYY-MM del mes actual
+  nombreBanco: (bancoId: string) => string,   // resolver inyectado por la vista
+): Array<{ bancoId: string; nombreBanco: string; montosPorMoneda: Partial<Record<Moneda, number>> }>
+```
+
+Comportamiento (idéntico en convenciones a `saldosPorBanco`):
+- Filtra ambas fuentes a `mes.slice(0,7)`.
+- Acumula neto por `(bancoId, moneda)`: ingreso suma `+importe`, gasto resta `−(monto ?? 0)`. **Nunca mezcla PEN con USD.**
+- Excluye el banco cuyo `nombreBanco(bancoId).toLowerCase() === 'no especificado'` (mismo criterio, case-insensitive).
+- **Omite la combinación banco+moneda cuyo neto sea exactamente `0`** (clave ausente, no `0`) — igual que `saldosPorBanco`. OJO: aquí se **conservan los netos negativos** (a diferencia de `montoSinBancoPorMoneda` que descarta ≤0), porque un balance negativo debe mostrarse. La condición es `!== 0`, no `> 0`.
+- Descarta el banco entero si no le queda ninguna moneda.
+
+Nota sobre la constante `NOMBRE_BANCO_NO_ESPECIFICADO`: hoy es privada en `useMoneda.ts`. Para no duplicar el literal, **exportarla** desde `useMoneda.ts` e importarla en `useDashboard.ts` (fuente única de verdad). Alternativa aceptable si el builder prefiere no tocar `useMoneda`: redeclarar el literal local con un comentario que apunte a la migración 006 — pero la exportación es preferible.
+
+## Decisión 2 — Cómo resolver el nombre del banco en `TarjetaBalanceMoneda.vue`
+
+**La vista resuelve los nombres antes de pasarlos como prop. El componente sigue siendo presentacional puro (NO inyecta store de bancos).**
+
+- Se mantiene el patrón ya establecido en `TarjetaBalanceMoneda` (props ya calculadas) y en `IngresosView` (la vista mapea `nombreBanco` antes de llamar a la función pura).
+- `DashboardView` gana un helper `nombreBanco(bancoId)` idéntico al de `IngresosView` (leyendo `useIngresosStore().bancos`), lo inyecta a `cargarBalanceNetoPorBanco`, y el resultado ya trae `nombreBanco` resuelto por fila.
+- `TarjetaBalanceMoneda` recibe una prop nueva `desglosePorBanco` (array `{ bancoId, nombreBanco, montosPorMoneda }`) y solo la renderiza. Para formatear cada monto ya dispone de `formatearMonto` (import puro existente) — una fila por cada `(banco, moneda)` con su propia moneda, de modo que "S/ ..." y "$..." nunca se mezclan en la misma línea (esto es lo que produce las dos filas de "Interbank" de la captura).
 
 ## Archivos a crear/modificar
-- `src/components/TarjetaResumenMoneda.vue` — **modificar** — añadir props `montoSecundario?`, `monedaSecundaria?`; computed `montoSecundarioFormateado`; bloque insignia en template (abajo-derecha) con render condicional; CSS `.insignia-secundaria`. **Chunk independiente A.**
-- `src/components/TarjetaBalanceMoneda.vue` — **modificar** — mismos props secundarios; computed de formateo; insignia abajo-derecha junto/bajo el enlace "Ver ingresos"; conservar triángulo y clases `balance-positivo`/`balance-negativo`. **Chunk independiente B.**
-- `src/views/DashboardView.vue` — **modificar** — reemplazar las 3 `<section class="seccion-resumen">` (6 tarjetas) por **una** `<section class="seccion-resumen">` con 3 tarjetas: 1 `TarjetaResumenMoneda` "Gastado" (`total`=PEN, `montoSecundario`=USD), 1 `TarjetaResumenMoneda` "Ingresos", 1 `TarjetaBalanceMoneda` (`balance`=PEN + `montoSecundario`=USD). CSS: `grid-template-columns: 1fr 1fr 1fr` + media query de apilado móvil. **Depende de A y B** (usa sus props nuevos); hacer al final.
-- `src/components/__tests__/TarjetaResumenMoneda.spec.ts` — **modificar** — añadir tests de insignia (ver plan de pruebas). Independiente.
-- `src/components/__tests__/TarjetaBalanceMoneda.spec.ts` — **modificar** — añadir tests de insignia; conservar los de color/signo/enlace. Independiente.
-- `src/views/__tests__/DashboardView.spec.ts` — **modificar** — reescribir los 3-4 tests acoplados a "2 instancias por fila" y a los `aria-label` de sección. Depende de la nueva estructura de la vista.
 
-Paralelizable: chunks A y B (componentes + sus specs) no se solapan. La vista y su spec van después.
+Chunks marcados; A y B no se solapan y pueden construirse en paralelo. C depende de A y B.
+
+- **[Chunk A]** `src/composables/useMoneda.ts` — modificar — exportar la constante `NOMBRE_BANCO_NO_ESPECIFICADO` (cambiar de `const` privado a `export const`). Sin otros cambios funcionales.
+- **[Chunk A]** `src/composables/useDashboard.ts` — modificar — añadir función pura exportada `cargarBalanceNetoPorBanco` (ver firma arriba); importar `NOMBRE_BANCO_NO_ESPECIFICADO` desde `useMoneda`.
+- **[Chunk B]** `src/components/TarjetaBalanceMoneda.vue` — modificar — nueva prop opcional `desglosePorBanco: Array<{ bancoId: string; nombreBanco: string; montosPorMoneda: Partial<Record<Moneda, number>> }>` (default `[]`); markup: línea divisoria + lista `v-if="desglosePorBanco.length > 0"`, una fila por banco iterando `Object.entries(banco.montosPorMoneda)` con `formatearMonto(monto, moneda)`; color rojo/verde por signo del monto (reutilizar criterio `< 0`). Estilos scoped para el divisor y las filas.
+- **[Chunk C — depende de A y B]** `src/views/DashboardView.vue` — modificar —
+  1. importar `useBancos` y `useIngresosStore`; en `onMounted` añadir `cargarBancos()`.
+  2. helper `nombreBanco(bancoId)` (copia del de `IngresosView`).
+  3. `computed` `desgloseBalancePorBanco` que llama a `cargarBalanceNetoPorBanco(filas.value, filasIngresos.value, mesActual.value, nombreBanco)`.
+  4. pasar `:desglose-por-banco="desgloseBalancePorBanco"` a `<TarjetaBalanceMoneda>`.
+  5. **CSS del grid**: en `.seccion-resumen` añadir `align-items: start;` para que solo la tarjeta Balance crezca sin estirar las otras dos (hoy el grid no fija `align-items`, por lo que usa el `stretch` por defecto y las 3 columnas igualan altura).
+
+Tests (extender los specs existentes, mismo estilo con helpers `gastoDe`/`ingresoDe`):
+- `src/composables/__tests__/useDashboard.spec.ts` — casos de `cargarBalanceNetoPorBanco` (ver Plan de pruebas).
+- `src/components/__tests__/TarjetaBalanceMoneda.spec.ts` — render del desglose (filas por banco+moneda, negativos en rojo, lista ausente si vacío).
+- `src/views/__tests__/DashboardView.spec.ts` — que el desglose se pasa a la tarjeta con nombres resueltos y que se llama `cargarBancos`.
 
 ## Plan de pruebas
 
-### TarjetaResumenMoneda.spec.ts
-- **Conservar** los 6 tests actuales: siguen pasando porque los props nuevos son opcionales y la insignia no se renderiza sin ellos (el test "borde: sin etiqueta" ya cubre que el default no rompe la fila 1).
-- **Nuevo — camino feliz insignia:** con `montoSecundario: 40, monedaSecundaria: 'USD'`, se renderiza la insignia con `$40.00` (formato USD) y el monto principal sigue en `S/` (PEN). El monto principal (`.monto-resumen`) NO contiene el valor USD.
-- **Nuevo — borde:** sin props secundarios, la insignia no existe en el DOM.
-- **Nuevo — no interacción:** la insignia no contiene `a`, `button` ni `router-link` (es informativa).
+### Función pura `cargarBalanceNetoPorBanco` (unit, `useDashboard.spec.ts`)
+- **Un banco con una sola moneda**: 1 ingreso + 1 gasto mismo banco/moneda → una fila, neto = ingreso − gasto.
+- **Un banco con ambas monedas por separado**: movimientos PEN y USD del mismo banco → una entrada con `montosPorMoneda` de dos claves, cada una neta e independiente (nunca sumadas entre sí).
+- **Varios bancos**: netos correctos por banco, sin fugas cruzadas entre bancos.
+- **Exclusión de "No especificado"**: item cuyo `nombreBanco(...)` es "No especificado" (probar también "no especificado"/"NO ESPECIFICADO" para el case-insensitive) NO aparece.
+- **Banco con solo ingresos** → neto positivo = importe. **Banco con solo gastos** → neto negativo = −monto (se conserva, no se descarta).
+- **Saldo neto negativo**: gastos > ingresos → fila presente con valor negativo.
+- **Neto exactamente 0**: ingresos == gastos en esa moneda → esa moneda se omite; si es la única, el banco desaparece.
+- **Conjunto vacío**: `gastos=[]`, `ingresos=[]` → `[]`.
+- **Filtro de mes**: movimientos de otro mes dentro de la ventana de 6 meses NO cuentan.
+- **Monto nulo**: gasto con `monto: null` tratado como 0 (`?? 0`), no rompe.
 
-### TarjetaBalanceMoneda.spec.ts
-- **Conservar** los 6 tests actuales (color/signo/icono/cero/separación de monedas/enlace): no cambian, props secundarios opcionales.
-- **Nuevo — insignia USD:** con `montoSecundario` + `monedaSecundaria:'USD'`, se muestra el balance secundario formateado en `$`; el triángulo y la clase de signo del monto principal PEN se mantienen (probar positivo y negativo con insignia presente).
-- **Nuevo — borde:** sin props secundarios, sin insignia.
+### Componente `TarjetaBalanceMoneda` (`TarjetaBalanceMoneda.spec.ts`)
+- Camino feliz: dado `desglosePorBanco` con un banco de dos monedas, renderiza dos filas con nombre repetido y montos formateados con símbolo correcto (S/ vs $).
+- Borde: `desglosePorBanco` vacío/omitido → no renderiza la lista ni el divisor (no regresión de la tarjeta actual).
+- Neto negativo → fila con clase/color de error.
 
-### DashboardView.spec.ts — tests que SE ROMPEN (reescribir)
-1. `HU-7.1: muestra SIEMPRE las dos tarjetas de resumen...` (línea 97) — asumía 2 instancias en `section[aria-label="Gastado este mes"]`. Ahora hay **1** `TarjetaResumenMoneda` "Gastado" con `moneda='PEN'`, `total`=150, `montoSecundario`=40. Reescribir: localizar por `etiqueta`/orden, aserciones sobre `total` (PEN) y `montoSecundario` (USD).
-2. `Dashboard 3x2: fila "Ingresos este mes"...` (línea 120) — asumía 2 `TarjetaResumenMoneda` + `section[aria-label="Balance este mes"]` con 2 `TarjetaBalanceMoneda`. Ahora: 1 tarjeta Ingresos (`total`=500 PEN, `montoSecundario`=80 USD, `variacionPct`=null) y **1** `TarjetaBalanceMoneda`.
-3. `Dashboard 3x2 con datos reales de ambas fuentes...` (línea 154) — asumía 2 por sección en Gastado/Ingresos/Balance. Reescribir: Gastado → `total`=300, `montoSecundario`=25; Ingresos → `total`=1200, `montoSecundario`=50 (y `!=` los de gastos, conservando la protección anti copy-paste); Balance → `balance`=900 (PEN) y `montoSecundario`=25 (USD). Verificar que PEN y USD no se mezclan usando principal vs secundario de la MISMA tarjeta.
-4. Selectores `section[aria-label="..."]` desaparecen al colapsar a una sola sección. Nueva estrategia de consulta: `findAllComponents({ name: 'TarjetaResumenMoneda' })` + localizar por `props('etiqueta')` ('Gastado este mes' / 'Ingresos este mes'); Balance por `findComponent({ name: 'TarjetaBalanceMoneda' })`.
+### Vista + grid (`DashboardView.spec.ts` + verificación visual manual)
+- La vista pasa a `TarjetaBalanceMoneda` el desglose con nombres ya resueltos desde `bancos`; se invoca `cargarBancos` en `onMounted`.
+- **Grid no estira "Gastado"/"Ingresos"**: con `align-items: start`, al crecer la tarjeta Balance las otras dos conservan su altura de contenido (no se estiran a la más alta). Verificar en desktop (3 columnas) y que en móvil (`max-width: 640px`, 1 columna) sigue apilado sin cambios.
 
-### DashboardView.spec.ts — tests que probablemente SOBREVIVEN (verificar)
-- `estado sin datos` (línea 266) — `tarjetas.every(t => t.props('total') === 0)` sigue cierto (2 tarjetas resumen, ambas total 0). **Añadir** aserción de `montoSecundario === 0`.
-- `riesgo: no reusa store.gastos` (línea 364) — busca la tarjeta resumen con `moneda='PEN'` y `total===100`; ahora ambas resumen tienen `moneda='PEN'`, así que hay que localizar la de "Gastado" por `etiqueta` en vez de por `moneda` (ajuste menor para evitar fragilidad).
-- Toggle / tendencia mensual / tendencia diaria / error store / onMounted / count de fetch: **no se afectan** (no dependen de la fila de resumen).
-
-### DashboardView.spec.ts — tests NUEVOS
-- **Estructura:** existe **una sola** `section.seccion-resumen`; contiene exactamente 2 `TarjetaResumenMoneda` (Gastado + Ingresos) y 1 `TarjetaBalanceMoneda` (3 tarjetas en la fila).
-- **Cableado de insignia:** cada tarjeta recibe `monedaSecundaria='USD'` y su `montoSecundario` correcto (gasto USD, ingreso USD, balance USD).
-
-### Responsive (fila de 3 → apilado en móvil ~375px)
-- **CSS:** `.seccion-resumen` usa `grid-template-columns: 1fr 1fr 1fr` en desktop y una media query (p. ej. `@media (max-width: 640px) { grid-template-columns: 1fr; }`) para apilar; validar además que la insignia (abajo-derecha) no desborde ni empuje el monto en ancho estrecho.
-- **Limitación de test:** jsdom (entorno de Vitest) **no evalúa media queries** ni layout real, por lo que el apilado no es asegurable con un test unitario fiable. Recomendación: verificación **visual/manual** a 375px (o e2e si existe ese tramo). Anotarlo así en el PR; no forzar un test frágil que "lea" el CSS.
-
-## Sugerencias fuera de alcance (no incluidas en el build)
-- `useMoneda` podría exponer un helper "formato compacto/insignia" si la insignia se reutiliza en otras vistas; hoy no hace falta.
-- Si en el futuro entra una 3ª moneda, `monedaSecundaria` ya lo soporta sin refactor (razón extra para no hardcodear USD).
+## Sugerencias fuera de alcance (NO incluir en este build)
+- Podría extraerse un helper compartido `nombreBanco(bancoId)` (hoy duplicado entre `IngresosView` y ahora `DashboardView`) — pero mantener el precedente local evita ampliar el alcance.
+- Igual que `saldosPorBanco` tiene su contraparte `montoSinBancoPorMoneda` ("Incluye … sin banco asignado"), el Dashboard podría más adelante mostrar el neto de "No especificado" como nota. No pedido aquí.

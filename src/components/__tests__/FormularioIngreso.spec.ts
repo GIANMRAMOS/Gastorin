@@ -6,7 +6,7 @@ import { useIngresosStore } from '@/stores/ingresos'
 import { useAuthStore } from '@/stores/auth'
 import { supabase } from '@/lib/supabaseClient'
 import { crearConstructorConsulta } from '@/lib/__mocks__/supabaseClient'
-import type { Banco } from '@/types/ingreso'
+import type { Banco, Ingreso } from '@/types/ingreso'
 
 const fromMock = supabase.from as unknown as Mock
 
@@ -17,8 +17,19 @@ const bancoFalso: Banco = {
   created_at: '',
 }
 
-function montarFormulario() {
-  return mount(FormularioIngreso)
+const ingresoBase: Ingreso = {
+  id: 'i1',
+  usuario_id: 'u1',
+  banco_id: 'b1',
+  fecha: '2026-07-10',
+  moneda: 'PEN',
+  importe: 100,
+  concepto: 'Sueldo',
+  created_at: '',
+}
+
+function montarFormulario(ingreso: Ingreso | null = null) {
+  return mount(FormularioIngreso, { props: { ingreso } })
 }
 
 /** Llena todos los campos válidos, salvo los que se indiquen en `omitir`. */
@@ -79,18 +90,25 @@ describe('FormularioIngreso (HU-11.2)', () => {
     await new Promise((r) => setTimeout(r, 0))
 
     expect(fromMock).not.toHaveBeenCalled()
-    expect(wrapper.find('[role="alert"]').text()).toBe('Ingresa un importe válido mayor a 0.')
+    expect(wrapper.find('[role="alert"]').text()).toBe('El importe no puede ser cero.')
     expect(wrapper.emitted('guardado')).toBeUndefined()
   })
 
-  it('borde Gherkin — importe negativo: bloquea el envío sin llamar a Supabase', async () => {
+  it('importe negativo AHORA se acepta: llama a Supabase (insert) y emite guardado', async () => {
+    const builder = crearConstructorConsulta()
+    fromMock.mockReturnValueOnce(builder)
+    const ingresoCreado = { ...ingresoBase, importe: -50 }
+    ;(builder.single as Mock).mockResolvedValueOnce({ data: ingresoCreado, error: null })
+
     const wrapper = montarFormulario()
     await llenarCamposValidos(wrapper, { importe: '-50' })
     await wrapper.find('form').trigger('submit.prevent')
     await new Promise((r) => setTimeout(r, 0))
 
-    expect(fromMock).not.toHaveBeenCalled()
-    expect(wrapper.find('[role="alert"]').text()).toBe('Ingresa un importe válido mayor a 0.')
+    expect(builder.insert).toHaveBeenCalledWith(
+      expect.objectContaining({ importe: -50 }),
+    )
+    expect(wrapper.emitted('guardado')).toHaveLength(1)
   })
 
   it('borde: importe no numérico bloquea el envío', async () => {
@@ -100,7 +118,7 @@ describe('FormularioIngreso (HU-11.2)', () => {
     await new Promise((r) => setTimeout(r, 0))
 
     expect(fromMock).not.toHaveBeenCalled()
-    expect(wrapper.find('[role="alert"]').text()).toBe('Ingresa un importe válido mayor a 0.')
+    expect(wrapper.find('[role="alert"]').text()).toBe('El importe no puede ser cero.')
   })
 
   it('borde Gherkin — sin banco (payload sin banco_id): bloquea con "Selecciona un banco." sin llamar a Supabase', async () => {
@@ -248,5 +266,84 @@ describe('FormularioIngreso (HU-11.2)', () => {
     expect(wrapper.find('[role="alert"]').text()).toBe('No hay bancos; créalos primero.')
     expect((wrapper.find('#importe').element as HTMLInputElement).disabled).toBe(true)
     expect(wrapper.find('button[type="submit"]').attributes('disabled')).toBeDefined()
+  })
+
+  describe('HU-11.3 — editar ingreso', () => {
+    it('camino feliz: los 5 campos aparecen prellenados con los valores del ingreso; al cambiar uno y enviar actualiza (no inserta)', async () => {
+      const wrapper = montarFormulario(ingresoBase)
+
+      // Prellenado
+      expect((wrapper.find('#importe').element as HTMLInputElement).value).toBe('100')
+      expect((wrapper.find('#banco').element as HTMLSelectElement).value).toBe('b1')
+      expect((wrapper.find('#moneda-ingreso').element as HTMLSelectElement).value).toBe('PEN')
+      expect((wrapper.find('#fecha-ingreso').element as HTMLInputElement).value).toBe('2026-07-10')
+      expect((wrapper.find('#concepto').element as HTMLInputElement).value).toBe('Sueldo')
+
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      const ingresoActualizado = { ...ingresoBase, importe: 250, concepto: 'Bono' }
+      ;(builder.single as Mock).mockResolvedValueOnce({ data: ingresoActualizado, error: null })
+
+      await wrapper.find('#importe').setValue('250')
+      await wrapper.find('#concepto').setValue('Bono')
+      await wrapper.find('form').trigger('submit.prevent')
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(builder.update).toHaveBeenCalledWith({
+        banco_id: 'b1',
+        fecha: '2026-07-10',
+        moneda: 'PEN',
+        importe: 250,
+        concepto: 'Bono',
+      })
+      expect(builder.eq).toHaveBeenCalledWith('id', 'i1')
+      expect(builder.insert).not.toHaveBeenCalled()
+      expect(wrapper.emitted('guardado')).toHaveLength(1)
+    })
+
+    it('borde: en modo edición, las validaciones de bloqueo siguen aplicando (importe = 0 bloquea sin llamar a Supabase)', async () => {
+      const wrapper = montarFormulario(ingresoBase)
+      await wrapper.find('#importe').setValue('0')
+      await wrapper.find('form').trigger('submit.prevent')
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(fromMock).not.toHaveBeenCalled()
+      expect(wrapper.find('[role="alert"]').text()).toBe('El importe no puede ser cero.')
+      expect(wrapper.emitted('guardado')).toBeUndefined()
+    })
+
+    it('borde: en modo edición, importe negativo ahora se acepta (llama update, no bloquea)', async () => {
+      const wrapper = montarFormulario(ingresoBase)
+
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      const ingresoActualizado = { ...ingresoBase, importe: -50 }
+      ;(builder.single as Mock).mockResolvedValueOnce({ data: ingresoActualizado, error: null })
+
+      await wrapper.find('#importe').setValue('-50')
+      await wrapper.find('form').trigger('submit.prevent')
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(builder.update).toHaveBeenCalledWith(
+        expect.objectContaining({ importe: -50 }),
+      )
+      expect(wrapper.emitted('guardado')).toHaveLength(1)
+    })
+
+    it('regresión: sin prop ingreso, sigue en modo alta (llama insert, no update)', async () => {
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      const ingresoCreado = { ...ingresoBase, id: 'i-nuevo' }
+      ;(builder.single as Mock).mockResolvedValueOnce({ data: ingresoCreado, error: null })
+
+      const wrapper = montarFormulario(null)
+      await llenarCamposValidos(wrapper)
+      await wrapper.find('form').trigger('submit.prevent')
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(builder.insert).toHaveBeenCalled()
+      expect(builder.update).not.toHaveBeenCalled()
+      expect(wrapper.emitted('guardado')).toHaveLength(1)
+    })
   })
 })
