@@ -1,83 +1,74 @@
-# Micro-plan — Sidebar sin botones de registro + Tendencia Diaria en Dashboard
+# Micro-plan — Rediseño Dashboard: fila única de 3 tarjetas con insignia USD
 
 ## Patrón arquitectónico detectado
-
-Proyecto Vue 3 + `<script setup lang="ts">` + Pinia, con capas bien separadas:
-
-- **Vistas** (`src/views/*.vue`): orquestan estado local de UI (refs `modalAbierto`, filtros) y delegan datos a composables/stores. El patrón de cabecera "+ Nuevo X" ya está establecido idéntico en tres vistas (`CategoriasView`, `HistorialView`, `IngresosView`): `div.cabecera-*` con `<h1>` + `button.boton-primario.boton-nuevo` que llama a `abrirModalAlta()`, y el modal montado con `v-if` **dentro de la propia vista**. El CSS de `.boton-nuevo` es idéntico y visible a cualquier ancho (no está tras `@media`).
-- **Composables de dominio** (`src/composables/useDashboard.ts`): exportan **funciones puras** a nivel de módulo (`cargarTendenciaMensual`, `cargarGastoPorCategoria`, `cargarResumenPorMoneda`, `cargarBalancePorMoneda`) + un `useDashboard()` que hace el fetch a Supabase y guarda las filas crudas en un `ref` local. Las funciones puras reciben `(gastos, ...params)` y se testean aisladas.
-- **Componentes presentacionales** (`src/components/GraficoTendenciaMensual.vue`): reciben `datos`/`moneda` por props, dibujan con CSS (`height %`), **sin librería de gráficos** (precedente explícito: barra de `TarjetaPresupuesto`).
-- **Layout** (`AppShellLayout.vue`): sidebar desktop (≥900px) + bottom-nav móvil + FAB. Hoy el sidebar tiene DOS botones extra (`Registrar gasto` / `Registrar ingreso`, clase `.item-nav-boton`) que abren `ModalGasto`/`ModalIngreso` montados en el propio layout. El FAB móvil abre `HojaAccionesFab`, que también abre esos mismos modales del layout.
-
-**Hallazgo que acota el Cambio 1:** los botones "+ Nuevo gasto" / "+ Nuevo ingreso" en las vistas **ya existen y ya abren su propio modal** (`HistorialView.vue:152`, `IngresosView.vue:52`; el test `IngresosView.spec.ts:91` ya lo verifica). Por tanto la decisión de "quién abre el modal" ya está tomada por el patrón vigente: **la vista abre su propio modal**. El Cambio 1 se reduce a **quitar los dos botones del sidebar** (y su código muerto asociado), sin tocar las vistas ni el FAB móvil.
+- **Capas.** `DashboardView.vue` es el contenedor con estado: consume `useDashboard`, `useCategorias`, `useGastosStore` y los helpers puros `cargarResumenPorMoneda` / `cargarBalancePorMoneda` (en `composables/useDashboard`). Calcula todo vía `computed` y pasa datos ya listos por props. `TarjetaResumenMoneda.vue` y `TarjetaBalanceMoneda.vue` son **presentacionales puros**: reciben números formateables y no tocan store ni composables de datos (solo `useMoneda` para formatear).
+- **Formateo de moneda.** Centralizado en `useMoneda().formatearMonto(monto, moneda)`. `Moneda` es un tipo (`'PEN' | 'USD'`) en `@/types/gasto`. El proyecto hoy solo maneja esas dos monedas.
+- **Estilos.** CSS scoped por componente + tokens globales en `src/assets/estilos-base.css` (`--espacio-*`, `--tamano-pequeno`, `--color-texto-terciario`, `--color-borde-tarjeta`, `--color-fondo`, `--color-primario`, `--color-error`, `--color-exito`). Las tarjetas usan `.tarjeta-*` con `display:flex; flex-direction:column`. El grid contenedor vive en la vista (`.seccion-resumen`), no en las tarjetas.
+- **Convenciones.** Nombres en español; props con `defineProps<>()`; comentarios JSDoc por prop/computed; tests con Vitest + `@vue/test-utils`, consultando por `findAllComponents({ name })` y `props(...)`.
 
 ## Desviación de arquitectura
-
 - ¿Se necesita desviarse? **NO.**
-- Ambos cambios encajan en patrones ya existentes:
-  - Cambio 1: solo elimina elementos del sidebar; las vistas ya siguen el patrón "+ Nuevo".
-  - Cambio 2: nueva función pura análoga a `cargarTendenciaMensual` (mismo módulo, misma firma) + nuevo componente presentacional CSS sin librería (mismo patrón que `GraficoTendenciaMensual`) + nueva sección en `DashboardView` gobernada por el `monedaSeleccionada` ya existente. No cambia el modelo de datos, no toca fetch, no introduce patrón nuevo.
-- **No dispara GATE 1.**
+- Son cambios de **props + template + CSS** en 2 componentes presentacionales ya existentes, más la **reestructuración del grid contenedor** en la vista. No se tocan composables, store, tipos, ni el modelo de datos. `cargarResumenPorMoneda` y `cargarBalancePorMoneda` ya devuelven ambos montos (PEN y USD): solo cambia cómo la vista los reparte a las tarjetas (antes 6 instancias, ahora 3). No dispara GATE 1.
 
-### Decisiones de criterio documentadas
+## Decisión sobre los props (pregunta 2)
+**Preservar la genericidad, no hardcodear PEN/USD.** Razones:
+- Los componentes hoy son genéricos por `moneda` y sus tests lo verifican (formateo `S/` vs `$`, separación de monedas). Hardcodear PEN adentro rompería esa genericidad por una ganancia nula: pasar `moneda="PEN"` desde la vista cuesta una línea.
+- La insignia secundaria debe formatearse con `formatearMonto`, que ya necesita una `Moneda`. Pasar `monedaSecundaria="USD"` reusa la misma ruta de formateo sin casos especiales. Hardcodear `USD` en el template ataría el componente al par PEN/USD justo cuando su única dependencia real es `formatearMonto`.
 
-1. **Cambio 1 — quién abre el modal:** se mantiene el patrón ya vigente (la vista abre su propio modal). En el layout, tras quitar los botones del sidebar, `ModalGasto`/`ModalIngreso` **siguen montados en el layout** porque el FAB móvil (`HojaAccionesFab`) los sigue usando — esa vía NO se toca. Solo quedan huérfanas las funciones `abrirModalGasto()` (`AppShellLayout.vue:50`) y `abrirModalIngreso()` (`:65`), cuyo único llamador eran los botones borrados: se eliminan como código muerto. El resto (`cerrar*`, `manejarGuardado*`, `elegir*DesdeHoja`, `abrirHoja`) se conserva (lo usa la hoja del FAB).
+**Contrato de props resultante (aditivo, retrocompatible):**
 
-2. **Cambio 2 — reutilizar vs. crear componente:** `GraficoTendenciaMensual.vue` **NO es genérico**: keyea por `dato.mes`, formatea etiquetas con `etiquetaMes()` que asume prefijo `YYYY-MM`, y es un gráfico de **barras**. La tarea pide un gráfico de **líneas** de 30 puntos diarios (`YYYY-MM-DD`); reusarlo obligaría a 30 barras finas con 30 etiquetas de mes repetidas ("jul jul jul…"), y generalizarlo a líneas cambiaría el diseño de la mensual (que debe seguir siendo barras). Decisión: **crear `GraficoTendenciaDiaria.vue`** (mismo patrón: presentacional, props `datos`/`moneda`, CSS/SVG sin librería). Así no se rompen los tests de la mensual ni se acopla un componente a dos formas de datos.
+`TarjetaResumenMoneda`:
+- Mantiene `moneda: Moneda` (= la principal, `'PEN'` en este uso), `total`, `variacionPct`, `etiqueta?`.
+- Añade `montoSecundario?: number` y `monedaSecundaria?: Moneda` (ambos opcionales). La insignia se renderiza solo si `monedaSecundaria` está definida (o `montoSecundario !== undefined`). Así los tests/usos sin insignia no se rompen.
 
-3. **Cambio 2 — sin fetch nuevo (confirmado):** `useDashboard.cargarDatosDashboard()` hace `gte('fecha', primerDiaDeMesRelativo(5))` = primer día del mes hace 5 meses (p.ej. hoy 2026-07 → `2026-02-01`, ver test `useDashboard.spec.ts:282`). Los últimos 30 días caen holgadamente dentro de esa ventana ya cargada en `filas`. `cargarTendenciaDiaria` es **solo una nueva agregación sobre `filas.value`**, sin tocar el fetch.
+`TarjetaBalanceMoneda`:
+- Mantiene `moneda`, `ingresos`, `gastos`, `balance`.
+- Añade `montoSecundario?: number` y `monedaSecundaria?: Moneda` (= balance en la moneda secundaria). Misma regla de render condicional.
+
+La insignia es **informativa y sin interacción**: un `<span>`/`<p>` con texto formateado, sin `router-link`, `button` ni handlers; subordinada visualmente (menor tamaño, color secundario/terciario, tipo "chip").
 
 ## Archivos a crear/modificar
+- `src/components/TarjetaResumenMoneda.vue` — **modificar** — añadir props `montoSecundario?`, `monedaSecundaria?`; computed `montoSecundarioFormateado`; bloque insignia en template (abajo-derecha) con render condicional; CSS `.insignia-secundaria`. **Chunk independiente A.**
+- `src/components/TarjetaBalanceMoneda.vue` — **modificar** — mismos props secundarios; computed de formateo; insignia abajo-derecha junto/bajo el enlace "Ver ingresos"; conservar triángulo y clases `balance-positivo`/`balance-negativo`. **Chunk independiente B.**
+- `src/views/DashboardView.vue` — **modificar** — reemplazar las 3 `<section class="seccion-resumen">` (6 tarjetas) por **una** `<section class="seccion-resumen">` con 3 tarjetas: 1 `TarjetaResumenMoneda` "Gastado" (`total`=PEN, `montoSecundario`=USD), 1 `TarjetaResumenMoneda` "Ingresos", 1 `TarjetaBalanceMoneda` (`balance`=PEN + `montoSecundario`=USD). CSS: `grid-template-columns: 1fr 1fr 1fr` + media query de apilado móvil. **Depende de A y B** (usa sus props nuevos); hacer al final.
+- `src/components/__tests__/TarjetaResumenMoneda.spec.ts` — **modificar** — añadir tests de insignia (ver plan de pruebas). Independiente.
+- `src/components/__tests__/TarjetaBalanceMoneda.spec.ts` — **modificar** — añadir tests de insignia; conservar los de color/signo/enlace. Independiente.
+- `src/views/__tests__/DashboardView.spec.ts` — **modificar** — reescribir los 3-4 tests acoplados a "2 instancias por fila" y a los `aria-label` de sección. Depende de la nueva estructura de la vista.
 
-Chunks independientes marcados con [A]/[B] (pueden construirse en paralelo; dentro de [B], `DashboardView.vue` depende de los dos artefactos nuevos).
-
-### Chunk [A] — Cambio 1 (sidebar)
-- `src/layouts/AppShellLayout.vue` — **modificar** — quitar del `<nav class="navegacion">` los dos `<button class="item-nav item-nav-boton">` de "Registrar gasto" (líneas ~145-150) y "Registrar ingreso" (~194-199). Eliminar las funciones muertas `abrirModalGasto()` y `abrirModalIngreso()`. Conservar: `ModalGasto`/`ModalIngreso` montados, FAB, `HojaAccionesFab` y todos los handlers `cerrar*`/`manejarGuardado*`/`elegir*DesdeHoja`/`abrirHoja`. Ajustar el comentario de cabecera del componente (líneas 16-23) que menciona "En escritorio, Registrar gasto/Registrar ingreso abren sus modales directamente".
-- `src/layouts/__tests__/AppShellLayout.spec.ts` — **modificar** — ver Plan de pruebas.
-
-### Chunk [B] — Cambio 2 (tendencia diaria)
-- `src/composables/useDashboard.ts` — **modificar** — nueva función pura exportada `cargarTendenciaDiaria(gastos, moneda, dias = 30)`, análoga a `cargarTendenciaMensual` pero agrupando por día `YYYY-MM-DD`, iterando `dias` días hacia atrás desde hoy (inclusive), devolviendo cada día con `total: 0` si no hay gasto, en orden cronológico ascendente (último = hoy). Añadir helper local `fechaDiaRelativo(diasAtras): string` (aritmética local con `getFullYear/getMonth/getDate` + `padStart`, mismo estilo que `primerDiaDeMesRelativo`, cuidando el cruce de mes/año). Constante `DIAS_VENTANA_TENDENCIA_DIARIA = 30`. NO tocar `cargarDatosDashboard`.
-- `src/components/GraficoTendenciaDiaria.vue` — **crear** — presentacional, props `{ datos: Array<{ dia: string; total: number }>, moneda: Moneda }`, gráfico de líneas (SVG `polyline`/`path` sobre un viewBox, o CSS) sin librería. Etiquetas de eje espaciadas para no saturar (p.ej. primer/último día, o cada N días); resaltar el último punto (hoy). Usar `useMoneda().formatearMonto` para el tooltip/`title` del punto, como hace la mensual.
-- `src/views/DashboardView.vue` — **modificar** — importar `cargarTendenciaDiaria` y `GraficoTendenciaDiaria`; computed `tendenciaDiaria = computed(() => cargarTendenciaDiaria(filas.value, monedaSeleccionada.value))`; nueva `<section class="seccion-dashboard">` con `<h2>Tendencia diaria</h2>` y el nuevo gráfico, **debajo** de la sección "Tendencia mensual" (después de la línea 130). Reutiliza el `monedaSeleccionada` existente (NO crear otro `ToggleMoneda`).
-- `src/composables/__tests__/useDashboard.spec.ts` — **modificar** — añadir describe `cargarTendenciaDiaria`.
-- `src/components/__tests__/GraficoTendenciaDiaria.spec.ts` — **crear**.
-- `src/views/__tests__/DashboardView.spec.ts` — **modificar** — cobertura de la nueva sección y de que el toggle también gobierna la tendencia diaria.
+Paralelizable: chunks A y B (componentes + sus specs) no se solapan. La vista y su spec van después.
 
 ## Plan de pruebas
 
-### Tests EXISTENTES que rompen y hay que actualizar (Cambio 1)
+### TarjetaResumenMoneda.spec.ts
+- **Conservar** los 6 tests actuales: siguen pasando porque los props nuevos son opcionales y la insignia no se renderiza sin ellos (el test "borde: sin etiqueta" ya cubre que el default no rompe la fila 1).
+- **Nuevo — camino feliz insignia:** con `montoSecundario: 40, monedaSecundaria: 'USD'`, se renderiza la insignia con `$40.00` (formato USD) y el monto principal sigue en `S/` (PEN). El monto principal (`.monto-resumen`) NO contiene el valor USD.
+- **Nuevo — borde:** sin props secundarios, la insignia no existe en el DOM.
+- **Nuevo — no interacción:** la insignia no contiene `a`, `button` ni `router-link` (es informativa).
 
-1. `AppShellLayout.spec.ts` — describe "orden de menú" › test `sidebar de escritorio: orden exacto…` (línea 158): el array esperado incluye `'Registrar gasto'` y `'Registrar ingreso'` y usa el selector `.item-nav, .item-nav-boton`. **Rompe.** Actualizar el array esperado a `['Dashboard','Egresos','Ingresos','Bandeja','Presupuestos','Categorías','Bancos']` (ya no hay `.item-nav-boton` en el sidebar) y ajustar el chequeo de índice: hoy verifica `nav.findAll('.item-nav')[2].href === '/historial'`; con los botones fuera, 'Egresos' pasa a índice 1 → `[1]`. Renombrar el título del test.
-2. `AppShellLayout.spec.ts` — describe "fix: bancos/categorías se cargan al montar el shell" › helper `abrirNuevoGasto` (líneas 342-348): clickea el botón `.item-nav-boton` "Registrar gasto" del sidebar, que ya no existe. **Rompe los 3 tests que lo usan** (líneas 350, 377, 402). Reescribir `abrirNuevoGasto` para abrir el modal por la vía que queda: click en `.boton-fab` → en `HojaAccionesFab` emitir/clickear "registrar gasto". Mantiene intacta la intención (verificar que el modal ve bancos/categorías ya cargados en `onMounted`). El test "borde: onMounted pide bancos/categorías exactamente una vez" (línea 415) NO cambia.
-3. `AppShellLayout.independiente.spec.ts`: no referencia los botones de registro; **no rompe** (revisado). No tocar.
+### TarjetaBalanceMoneda.spec.ts
+- **Conservar** los 6 tests actuales (color/signo/icono/cero/separación de monedas/enlace): no cambian, props secundarios opcionales.
+- **Nuevo — insignia USD:** con `montoSecundario` + `monedaSecundaria:'USD'`, se muestra el balance secundario formateado en `$`; el triángulo y la clase de signo del monto principal PEN se mantienen (probar positivo y negativo con insignia presente).
+- **Nuevo — borde:** sin props secundarios, sin insignia.
 
-### Tests NUEVOS — Cambio 1
-- `AppShellLayout.spec.ts`: "el sidebar YA NO contiene botones 'Registrar gasto'/'Registrar ingreso'" (`nav.navegacion .item-nav-boton` vacío; ningún texto de registro en `nav.navegacion`).
-- `AppShellLayout.spec.ts`: regresión — "el FAB móvil sigue siendo vía de registro" (extender el test del `.boton-fab` de línea 134: al elegir en la hoja, se monta `ModalGasto`/`ModalIngreso`).
-- `HistorialView.spec.ts`: **añadir** un test corto "el botón '+ Nuevo gasto' abre `ModalGasto` en modo alta" (hoy el spec solo cubre eliminar; el equivalente para ingresos ya existe en `IngresosView.spec.ts:91`).
+### DashboardView.spec.ts — tests que SE ROMPEN (reescribir)
+1. `HU-7.1: muestra SIEMPRE las dos tarjetas de resumen...` (línea 97) — asumía 2 instancias en `section[aria-label="Gastado este mes"]`. Ahora hay **1** `TarjetaResumenMoneda` "Gastado" con `moneda='PEN'`, `total`=150, `montoSecundario`=40. Reescribir: localizar por `etiqueta`/orden, aserciones sobre `total` (PEN) y `montoSecundario` (USD).
+2. `Dashboard 3x2: fila "Ingresos este mes"...` (línea 120) — asumía 2 `TarjetaResumenMoneda` + `section[aria-label="Balance este mes"]` con 2 `TarjetaBalanceMoneda`. Ahora: 1 tarjeta Ingresos (`total`=500 PEN, `montoSecundario`=80 USD, `variacionPct`=null) y **1** `TarjetaBalanceMoneda`.
+3. `Dashboard 3x2 con datos reales de ambas fuentes...` (línea 154) — asumía 2 por sección en Gastado/Ingresos/Balance. Reescribir: Gastado → `total`=300, `montoSecundario`=25; Ingresos → `total`=1200, `montoSecundario`=50 (y `!=` los de gastos, conservando la protección anti copy-paste); Balance → `balance`=900 (PEN) y `montoSecundario`=25 (USD). Verificar que PEN y USD no se mezclan usando principal vs secundario de la MISMA tarjeta.
+4. Selectores `section[aria-label="..."]` desaparecen al colapsar a una sola sección. Nueva estrategia de consulta: `findAllComponents({ name: 'TarjetaResumenMoneda' })` + localizar por `props('etiqueta')` ('Gastado este mes' / 'Ingresos este mes'); Balance por `findComponent({ name: 'TarjetaBalanceMoneda' })`.
 
-### Tests NUEVOS — Cambio 2 (`cargarTendenciaDiaria`)
-Usar `vi.useFakeTimers()` + `setSystemTime` como el describe de `cargarTendenciaMensual`.
-- Camino feliz: con `setSystemTime` fijo, devuelve exactamente 30 entradas en orden ascendente, la última con `dia` = hoy (`YYYY-MM-DD`), sumando por día en la moneda dada.
-- Borde (huecos): un día intermedio sin gasto aparece con `total: 0`, no se salta (mismo criterio que la mensual → sin huecos en el gráfico).
-- Borde (moneda): ignora gastos de la otra moneda.
-- Borde (fuera de ventana): un gasto de hace 31+ días no entra; un gasto de hoy sí.
-- Borde (parámetro `dias`): `cargarTendenciaDiaria(gastos, moneda, 7)` devuelve 7 entradas.
-- Borde: `gastos = []` → 30 entradas todas con `total: 0`.
-- Cruce de mes/año: fijar hoy p.ej. 2026-01-05 → la ventana incluye días de diciembre 2025 con el `YYYY-MM-DD` correcto, sin desfase de zona horaria.
+### DashboardView.spec.ts — tests que probablemente SOBREVIVEN (verificar)
+- `estado sin datos` (línea 266) — `tarjetas.every(t => t.props('total') === 0)` sigue cierto (2 tarjetas resumen, ambas total 0). **Añadir** aserción de `montoSecundario === 0`.
+- `riesgo: no reusa store.gastos` (línea 364) — busca la tarjeta resumen con `moneda='PEN'` y `total===100`; ahora ambas resumen tienen `moneda='PEN'`, así que hay que localizar la de "Gastado" por `etiqueta` en vez de por `moneda` (ajuste menor para evitar fragilidad).
+- Toggle / tendencia mensual / tendencia diaria / error store / onMounted / count de fetch: **no se afectan** (no dependen de la fila de resumen).
 
-### Tests NUEVOS — Cambio 2 (`GraficoTendenciaDiaria.vue`)
-- Camino feliz: con 30 puntos renderiza 30 elementos/puntos.
-- El último punto (hoy) se resalta (clase de destacado); los anteriores no.
-- Borde: puntos con `total: 0` se renderizan sin error (posición/altura 0, sin hueco).
-- El punto de total máximo alcanza el tope de la escala.
+### DashboardView.spec.ts — tests NUEVOS
+- **Estructura:** existe **una sola** `section.seccion-resumen`; contiene exactamente 2 `TarjetaResumenMoneda` (Gastado + Ingresos) y 1 `TarjetaBalanceMoneda` (3 tarjetas en la fila).
+- **Cableado de insignia:** cada tarjeta recibe `monedaSecundaria='USD'` y su `montoSecundario` correcto (gasto USD, ingreso USD, balance USD).
 
-### Tests NUEVOS — Cambio 2 (`DashboardView.spec.ts`)
-- Existe la sección "Tendencia diaria" con un `GraficoTendenciaDiaria` debajo de "Tendencia mensual".
-- Sigue habiendo **un único** `ToggleMoneda` (`findAllComponents({name:'ToggleMoneda'})` → 1) y al emitir `update:modelValue='USD'` cambian a la vez gasto-por-categoría, tendencia mensual **y tendencia diaria** (`GraficoTendenciaDiaria.props('moneda')` pasa a 'USD').
-- Estado sin datos: la tendencia diaria renderiza sin `[role=alert]` (todos los días en 0).
-- Ampliar "onMounted dispara cargarCategorias y cargarDatosDashboard": confirmar que la tendencia diaria NO dispara un fetch adicional (mismo número de llamadas a `from`).
+### Responsive (fila de 3 → apilado en móvil ~375px)
+- **CSS:** `.seccion-resumen` usa `grid-template-columns: 1fr 1fr 1fr` en desktop y una media query (p. ej. `@media (max-width: 640px) { grid-template-columns: 1fr; }`) para apilar; validar además que la insignia (abajo-derecha) no desborde ni empuje el monto en ancho estrecho.
+- **Limitación de test:** jsdom (entorno de Vitest) **no evalúa media queries** ni layout real, por lo que el apilado no es asegurable con un test unitario fiable. Recomendación: verificación **visual/manual** a 375px (o e2e si existe ese tramo). Anotarlo así en el PR; no forzar un test frágil que "lea" el CSS.
 
-## Sugerencias fuera de alcance (NO implementar en este build)
-- Extraer un helper compartido de escala/formato de eje si aparece un tercer gráfico (hoy mensual y diaria comparten poco: barras vs. líneas).
-- Revisar densidad visual del sidebar desktop tras la limpieza (puramente estético; no bloquea).
+## Sugerencias fuera de alcance (no incluidas en el build)
+- `useMoneda` podría exponer un helper "formato compacto/insignia" si la insignia se reutiliza en otras vistas; hoy no hace falta.
+- Si en el futuro entra una 3ª moneda, `monedaSecundaria` ya lo soporta sin refactor (razón extra para no hardcodear USD).

@@ -61,4 +61,47 @@ describe('TarjetaResumenMoneda (HU-7.1)', () => {
     expect(wrapper.text()).not.toContain('▲')
     expect(wrapper.text()).not.toContain('▼')
   })
+
+  it('insignia USD (camino feliz): con montoSecundario y monedaSecundaria se muestra el equivalente en $', () => {
+    const wrapper = mount(TarjetaResumenMoneda, {
+      props: {
+        moneda: 'PEN',
+        total: 150,
+        variacionPct: null,
+        montoSecundario: 40,
+        monedaSecundaria: 'USD',
+      },
+    })
+
+    const insignia = wrapper.find('.insignia-secundaria')
+    expect(insignia.exists()).toBe(true)
+    expect(insignia.text()).toContain('40.00')
+    expect(insignia.text()).toContain('$')
+    expect(wrapper.find('.monto-resumen').text()).not.toContain('40.00')
+  })
+
+  it('borde: sin montoSecundario/monedaSecundaria no se renderiza la insignia', () => {
+    const wrapper = mount(TarjetaResumenMoneda, {
+      props: { moneda: 'PEN', total: 150, variacionPct: null },
+    })
+
+    expect(wrapper.find('.insignia-secundaria').exists()).toBe(false)
+  })
+
+  it('la insignia es informativa: no contiene enlaces ni botones', () => {
+    const wrapper = mount(TarjetaResumenMoneda, {
+      props: {
+        moneda: 'PEN',
+        total: 150,
+        variacionPct: null,
+        montoSecundario: 40,
+        monedaSecundaria: 'USD',
+      },
+    })
+
+    const insignia = wrapper.find('.insignia-secundaria')
+    expect(insignia.find('a').exists()).toBe(false)
+    expect(insignia.find('button').exists()).toBe(false)
+    expect(insignia.find('router-link').exists()).toBe(false)
+  })
 })

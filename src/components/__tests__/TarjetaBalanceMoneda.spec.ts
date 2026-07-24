@@ -8,6 +8,8 @@ async function montarTarjeta(props: {
   ingresos: number
   gastos: number
   balance: number
+  montoSecundario?: number
+  monedaSecundaria?: 'PEN' | 'USD'
 }) {
   const router = createRouter({
     history: createMemoryHistory(),
@@ -76,5 +78,44 @@ describe('TarjetaBalanceMoneda (HU-11.4)', () => {
     const enlace = wrapper.find('.enlace-ver-ingresos')
     expect(enlace.exists()).toBe(true)
     expect(enlace.attributes('href')).toBe('/ingresos')
+  })
+
+  it('insignia USD (balance positivo): muestra el balance secundario formateado en $ sin afectar el signo del principal', async () => {
+    const wrapper = await montarTarjeta({
+      moneda: 'PEN',
+      ingresos: 500,
+      gastos: 200,
+      balance: 300,
+      montoSecundario: 60,
+      monedaSecundaria: 'USD',
+    })
+
+    const insignia = wrapper.find('.insignia-secundaria')
+    expect(insignia.exists()).toBe(true)
+    expect(insignia.text()).toContain('60.00')
+    expect(insignia.text()).toContain('$')
+    expect(wrapper.find('.monto-balance').classes()).toContain('balance-positivo')
+  })
+
+  it('insignia USD (balance negativo): el triángulo y la clase de signo del principal se mantienen con la insignia presente', async () => {
+    const wrapper = await montarTarjeta({
+      moneda: 'PEN',
+      ingresos: 100,
+      gastos: 400,
+      balance: -300,
+      montoSecundario: -25,
+      monedaSecundaria: 'USD',
+    })
+
+    const monto = wrapper.find('.monto-balance')
+    expect(monto.classes()).toContain('balance-negativo')
+    expect(monto.text()).toContain('▼')
+    expect(wrapper.find('.insignia-secundaria').exists()).toBe(true)
+  })
+
+  it('borde: sin montoSecundario/monedaSecundaria no se renderiza la insignia', async () => {
+    const wrapper = await montarTarjeta({ moneda: 'PEN', ingresos: 500, gastos: 200, balance: 300 })
+
+    expect(wrapper.find('.insignia-secundaria').exists()).toBe(false)
   })
 })

@@ -15,9 +15,15 @@ const props = withDefaults(
     variacionPct: number | null
     /** Etiqueta superior de la tarjeta (permite reusarla para "Ingresos este mes", etc.). */
     etiqueta?: string
+    /** Monto equivalente en una segunda moneda, mostrado como insignia informativa. Opcional. */
+    montoSecundario?: number
+    /** Moneda del monto secundario (requerida junto a `montoSecundario` para mostrar la insignia). */
+    monedaSecundaria?: Moneda
   }>(),
   {
     etiqueta: 'Gastado este mes',
+    montoSecundario: undefined,
+    monedaSecundaria: undefined,
   },
 )
 
@@ -25,6 +31,17 @@ const { formatearMonto } = useMoneda()
 
 /** Monto del total formateado según la moneda de la tarjeta. */
 const totalFormateado = computed(() => formatearMonto(props.total, props.moneda))
+
+/** Indica si hay datos suficientes para mostrar la insignia de la moneda secundaria. */
+const mostrarInsignia = computed(
+  () => props.montoSecundario !== undefined && props.monedaSecundaria !== undefined,
+)
+
+/** Monto secundario formateado según su propia moneda (independiente de la principal). */
+const montoSecundarioFormateado = computed(() => {
+  if (props.montoSecundario === undefined || props.monedaSecundaria === undefined) return ''
+  return formatearMonto(props.montoSecundario, props.monedaSecundaria)
+})
 
 /** Sentido de la variación: sube (rojo/naranja), baja (verde) o sin dato. */
 const sentidoVariacion = computed<'sube' | 'baja' | null>(() => {
@@ -54,6 +71,7 @@ const variacionTexto = computed(() => {
       {{ variacionTexto }} vs. mes anterior
     </p>
     <p v-else class="variacion-resumen variacion-sin-dato">Sin variación</p>
+    <p v-if="mostrarInsignia" class="insignia-secundaria">{{ montoSecundarioFormateado }}</p>
   </article>
 </template>
 
@@ -98,5 +116,16 @@ const variacionTexto = computed(() => {
 
 .variacion-sin-dato {
   color: var(--color-texto-terciario);
+}
+
+.insignia-secundaria {
+  align-self: flex-end;
+  margin: var(--espacio-1) 0 0;
+  padding: 2px var(--espacio-2);
+  font-size: var(--tamano-pequeno);
+  font-weight: 600;
+  color: var(--color-texto-terciario);
+  background: var(--color-borde-tarjeta);
+  border-radius: var(--radio-tarjeta);
 }
 </style>

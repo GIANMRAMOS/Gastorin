@@ -25,6 +25,10 @@ import type { Moneda } from '@/types/gasto'
  * un único `ToggleMoneda` compartido— y balance neto por moneda (Épica 11,
  * HU-11.4). Es la nueva home de la app (ruta raíz redirige aquí, ver
  * `router/index.ts`).
+ *
+ * La fila de resumen consolida Gastado/Ingresos/Balance en 3 tarjetas (una
+ * fila), cada una con el monto principal en PEN y el equivalente en USD como
+ * insignia secundaria (props `montoSecundario`/`monedaSecundaria`).
  */
 const { filas, filasIngresos, cargarDatosDashboard } = useDashboard()
 const { cargarCategorias } = useCategorias()
@@ -76,48 +80,30 @@ const tendenciaDiaria = computed(() => cargarTendenciaDiaria(filas.value, moneda
 
     <p v-if="store.error" role="alert" class="mensaje-error">{{ store.error }}</p>
 
-    <section class="seccion-resumen" aria-label="Gastado este mes">
+    <section class="seccion-resumen">
       <TarjetaResumenMoneda
         moneda="PEN"
         etiqueta="Gastado este mes"
         :total="resumenPorMoneda.PEN.total"
         :variacion-pct="resumenPorMoneda.PEN.variacionPct"
+        :monto-secundario="resumenPorMoneda.USD.total"
+        moneda-secundaria="USD"
       />
-      <TarjetaResumenMoneda
-        moneda="USD"
-        etiqueta="Gastado este mes"
-        :total="resumenPorMoneda.USD.total"
-        :variacion-pct="resumenPorMoneda.USD.variacionPct"
-      />
-    </section>
-
-    <section class="seccion-resumen" aria-label="Ingresos este mes">
       <TarjetaResumenMoneda
         moneda="PEN"
         etiqueta="Ingresos este mes"
         :total="balancePorMoneda.PEN.ingresos"
         :variacion-pct="null"
+        :monto-secundario="balancePorMoneda.USD.ingresos"
+        moneda-secundaria="USD"
       />
-      <TarjetaResumenMoneda
-        moneda="USD"
-        etiqueta="Ingresos este mes"
-        :total="balancePorMoneda.USD.ingresos"
-        :variacion-pct="null"
-      />
-    </section>
-
-    <section class="seccion-resumen" aria-label="Balance este mes">
       <TarjetaBalanceMoneda
         moneda="PEN"
         :ingresos="balancePorMoneda.PEN.ingresos"
         :gastos="balancePorMoneda.PEN.gastos"
         :balance="balancePorMoneda.PEN.balance"
-      />
-      <TarjetaBalanceMoneda
-        moneda="USD"
-        :ingresos="balancePorMoneda.USD.ingresos"
-        :gastos="balancePorMoneda.USD.gastos"
-        :balance="balancePorMoneda.USD.balance"
+        :monto-secundario="balancePorMoneda.USD.balance"
+        moneda-secundaria="USD"
       />
     </section>
 
@@ -156,9 +142,15 @@ const tendenciaDiaria = computed(() => cargarTendenciaDiaria(filas.value, moneda
 
 .seccion-resumen {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr 1fr 1fr;
   gap: var(--espacio-3);
   margin-bottom: var(--espacio-6);
+}
+
+@media (max-width: 640px) {
+  .seccion-resumen {
+    grid-template-columns: 1fr;
+  }
 }
 
 .selector-moneda-dashboard {
