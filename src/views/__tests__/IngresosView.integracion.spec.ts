@@ -331,3 +331,22 @@ describe('IngresosView — desglose de saldos por banco', () => {
     expect(wrapper.find('.resumen-totalizador').text()).toContain('75.00')
   })
 })
+
+describe('IngresosView — agrupado por fecha', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockearCargaInicial()
+  })
+
+  it('cada ingreso de un día distinto queda bajo su propio encabezado de grupo; desglose por banco y nota sin-banco siguen presentes', async () => {
+    const wrapper = mount(IngresosView)
+    await flushPromises()
+
+    const encabezados = wrapper.findAll('.encabezado-grupo-fecha')
+    expect(encabezados).toHaveLength(3) // 3 ingresos, 3 días distintos (10 jul, 15 jul, 1 jun)
+    expect(encabezados.map((e) => e.text())).toEqual(['10 de julio', '15 de julio', '1 de junio'])
+
+    expect(wrapper.find('.desglose-bancos').exists()).toBe(true)
+    expect(wrapper.findAll('.fila-ingreso')).toHaveLength(3)
+  })
+})

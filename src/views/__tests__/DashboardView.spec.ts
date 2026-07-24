@@ -381,6 +381,63 @@ describe('DashboardView', () => {
     expect(new Set(tablasConsultadas).size).toBeLessThanOrEqual(3)
   })
 
+  it('widget "Últimos movimientos": se renderiza tras la sección de resumen y antes del toggle, con los últimos 5', async () => {
+    const builderCategorias = crearConstructorConsulta()
+    const builderGastos = crearConstructorConsulta()
+    const builderIngresos = crearConstructorConsulta()
+    fromMock
+      .mockReturnValueOnce(builderCategorias)
+      .mockReturnValueOnce(builderGastos)
+      .mockReturnValueOnce(builderIngresos)
+    ;(builderCategorias.order as Mock).mockResolvedValueOnce({ data: [categoriaComida], error: null })
+    ;(builderGastos.order as Mock).mockResolvedValueOnce({
+      data: [
+        gastoDe({ id: 'g1', fecha: '2026-07-01' }),
+        gastoDe({ id: 'g2', fecha: '2026-07-02' }),
+        gastoDe({ id: 'g3', fecha: '2026-07-03' }),
+      ],
+      error: null,
+    })
+    ;(builderIngresos.order as Mock).mockResolvedValueOnce({
+      data: [ingresoDe({ id: 'i1', fecha: '2026-07-04' }), ingresoDe({ id: 'i2', fecha: '2026-07-05' })],
+      error: null,
+    })
+
+    const wrapper = mount(DashboardView)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const widget = wrapper.findComponent({ name: 'UltimosMovimientos' })
+    expect(widget.exists()).toBe(true)
+    expect(widget.props('movimientos')).toHaveLength(5)
+    expect((widget.props('movimientos') as Array<{ id: string }>).map((m) => m.id)).toEqual([
+      'i2',
+      'i1',
+      'g3',
+      'g2',
+      'g1',
+    ])
+
+    // Posición: después de .seccion-resumen y antes de .selector-moneda-dashboard.
+    const html = wrapper.html()
+    const indiceResumen = html.indexOf('seccion-resumen')
+    const indiceWidget = html.indexOf('ultimos-movimientos')
+    const indiceToggle = html.indexOf('selector-moneda-dashboard')
+    expect(indiceResumen).toBeLessThan(indiceWidget)
+    expect(indiceWidget).toBeLessThan(indiceToggle)
+  })
+
+  it('widget "Últimos movimientos": sin datos, muestra su propio estado vacío', async () => {
+    prepararCargaInicial([], [])
+
+    const wrapper = mount(DashboardView)
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const widget = wrapper.findComponent({ name: 'UltimosMovimientos' })
+    expect(widget.props('movimientos')).toEqual([])
+  })
+
   it('riesgo: no reusa store.gastos preexistente (Historial) para sus cálculos', async () => {
     const store = useGastosStore()
     store.establecerGastos([gastoDe({ id: 'de-historial', moneda: 'PEN', fecha: '2026-07-01', monto: 99999 })])

@@ -5,6 +5,7 @@ import TarjetaBalanceMoneda from '@/components/TarjetaBalanceMoneda.vue'
 import ListaGastoPorCategoria from '@/components/ListaGastoPorCategoria.vue'
 import GraficoTendenciaMensual from '@/components/GraficoTendenciaMensual.vue'
 import GraficoTendenciaDiaria from '@/components/GraficoTendenciaDiaria.vue'
+import UltimosMovimientos from '@/components/UltimosMovimientos.vue'
 import ToggleMoneda from '@/components/ToggleMoneda.vue'
 import {
   useDashboard,
@@ -13,6 +14,7 @@ import {
   cargarTendenciaMensual,
   cargarTendenciaDiaria,
   cargarBalancePorMoneda,
+  combinarUltimosMovimientos,
 } from '@/composables/useDashboard'
 import { useCategorias } from '@/composables/useCategorias'
 import { useGastosStore } from '@/stores/gastos'
@@ -72,6 +74,9 @@ const tendenciaMensual = computed(() => cargarTendenciaMensual(filas.value, mone
 
 /** Tendencia de los últimos 30 días en la moneda seleccionada (misma ventana de `filas`, sin fetch nuevo). */
 const tendenciaDiaria = computed(() => cargarTendenciaDiaria(filas.value, monedaSeleccionada.value))
+
+/** Últimos 5 movimientos (gastos + ingresos mezclados), independiente del toggle de moneda. */
+const ultimosMovimientos = computed(() => combinarUltimosMovimientos(filas.value, filasIngresos.value, 5))
 </script>
 
 <template>
@@ -105,6 +110,11 @@ const tendenciaDiaria = computed(() => cargarTendenciaDiaria(filas.value, moneda
         :monto-secundario="balancePorMoneda.USD.balance"
         moneda-secundaria="USD"
       />
+    </section>
+
+    <section class="seccion-dashboard">
+      <h2>Últimos movimientos</h2>
+      <UltimosMovimientos :movimientos="ultimosMovimientos" />
     </section>
 
     <div class="selector-moneda-dashboard">

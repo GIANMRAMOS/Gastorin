@@ -10,6 +10,7 @@ import { useColorCategoria } from '@/composables/useColorCategoria'
 import { useGastosStore } from '@/stores/gastos'
 import { useIngresosStore } from '@/stores/ingresos'
 import { useMoneda } from '@/composables/useMoneda'
+import { agruparPorFecha } from '@/composables/useFechas'
 import type { Gasto, Moneda } from '@/types/gasto'
 
 /**
@@ -105,6 +106,12 @@ const sinResultadosPorFiltro = computed(
 )
 
 /**
+ * Gastos filtrados agrupados por día. `gastosFiltrados` ya viene ordenado
+ * desc (mismo orden de `store.gastos`), así que el agrupador no reordena.
+ */
+const gruposGastos = computed(() => agruparPorFecha(gastosFiltrados.value, (gasto) => gasto.fecha))
+
+/**
  * Totalizador de la moneda predominante sobre el conjunto ya filtrado. Los
  * gastos confirmados nunca tienen `monto`/`moneda` en `null` (mismo guard que
  * `montoFormateado`); el `!` solo replica esa garantía existente.
@@ -182,29 +189,36 @@ async function confirmarEliminacion() {
       Total {{ formatearMonto(resumenGastos.total, resumenGastos.moneda) }}
     </p>
 
-    <ul v-if="gastosFiltrados.length > 0" class="lista-gastos">
-      <li v-for="gasto in gastosFiltrados" :key="gasto.id" class="fila-gasto">
-        <span class="circulo-categoria" :style="{ background: colorCategoria(gasto.categoria_id) }">
-          {{ abreviaturaCategoria(gasto.categoria_id) }}
-        </span>
+    <div v-if="gastosFiltrados.length > 0" class="grupos-gastos">
+      <div v-for="grupo in gruposGastos" :key="grupo.etiqueta + grupo.items[0].id" class="grupo-fecha">
+        <h2 class="encabezado-grupo-fecha">{{ grupo.etiqueta }}</h2>
+        <ul class="lista-gastos">
+          <li v-for="gasto in grupo.items" :key="gasto.id" class="fila-gasto">
+            <span class="circulo-categoria" :style="{ background: colorCategoria(gasto.categoria_id) }">
+              {{ abreviaturaCategoria(gasto.categoria_id) }}
+            </span>
 
-        <div class="detalle-gasto">
-          <p class="descripcion-gasto">{{ gasto.descripcion || nombreCategoria(gasto.categoria_id) }}</p>
-          <p class="metadatos-gasto">
-            {{ nombreCategoria(gasto.categoria_id) }} · {{ nombreBanco(gasto.banco_id) }} · {{ gasto.fecha }}
-          </p>
-        </div>
+            <div class="detalle-gasto">
+              <p class="descripcion-gasto">{{ gasto.descripcion || nombreCategoria(gasto.categoria_id) }}</p>
+              <p class="metadatos-gasto">
+                {{ nombreCategoria(gasto.categoria_id) }} · {{ nombreBanco(gasto.banco_id) }} · {{ gasto.fecha }}
+              </p>
+            </div>
 
-        <p class="monto-gasto">{{ montoFormateado(gasto) }}</p>
+            <p class="monto-gasto">{{ montoFormateado(gasto) }}</p>
 
-        <div class="acciones-gasto">
-          <button type="button" class="enlace-secundario indicador-editar" @click="abrirModalEdicion(gasto)">
-            Editar ›
-          </button>
-          <button type="button" class="enlace-secundario" @click="pedirConfirmacionEliminar(gasto)">Eliminar</button>
-        </div>
-      </li>
-    </ul>
+            <div class="acciones-gasto">
+              <button type="button" class="enlace-secundario indicador-editar" @click="abrirModalEdicion(gasto)">
+                Editar ›
+              </button>
+              <button type="button" class="enlace-secundario" @click="pedirConfirmacionEliminar(gasto)">
+                Eliminar
+              </button>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
 
     <div v-else-if="sinGastos" class="estado-vacio estado-vacio-generico">
       <p class="mensaje-vacio">Todavía no hay gastos registrados.</p>
@@ -260,6 +274,21 @@ async function confirmarEliminacion() {
   min-height: 44px;
   margin-top: 0;
   padding: 0 var(--espacio-4);
+}
+
+.grupos-gastos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espacio-4);
+}
+
+.encabezado-grupo-fecha {
+  margin: 0 0 var(--espacio-2);
+  font-size: var(--tamano-pequeno);
+  font-weight: 700;
+  color: var(--color-texto-secundario);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .lista-gastos {

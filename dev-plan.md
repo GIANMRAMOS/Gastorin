@@ -1,105 +1,104 @@
-# Micro-plan — Desglose de saldo NETO por banco en la tarjeta "Balance" del Dashboard
+# Micro-plan — Listas agrupadas por fecha (Historial/Ingresos) + widget "Últimos movimientos" (Dashboard)
 
-> Sobrescribe un `dev-plan.md` previo (tarea "nota sin banco asignado", ya cerrada).
+> Sobrescribe un `dev-plan.md` previo (tarea "desglose neto por banco", ya cerrada).
 
 ## Patrón arquitectónico detectado
 
-Arquitectura Vue 3 + TypeScript + Pinia con separación clara de capas:
+Vue 3 `<script setup lang="ts">` + Pinia + Supabase, con separación de capas muy consistente:
 
-- **Funciones puras de agregación** viven exportadas a nivel de módulo dentro de los composables de dominio (`cargarResumenPorMoneda`, `cargarGastoPorCategoria`, `cargarBalancePorMoneda`, etc. en `useDashboard.ts`). Reciben datos crudos + `mes`, NO tocan Supabase ni el store, y NO resuelven nombres (nombre de categoría/banco es responsabilidad de la vista). Testeadas de forma aislada en `useDashboard.spec.ts`.
-- **`useDashboard()`** es el composable de dominio del Dashboard: hace el fetch de la ventana de 6 meses de `gastos` (confirmados) e `ingresos` en refs locales (`filas`, `filasIngresos`) y no depende de que otra página se haya visitado.
-- **`useMoneda.ts`** es un composable puro de formateo + agregación **solo de ingresos** por banco (`saldosPorBanco`, `montoSinBancoPorMoneda`). Documentado explícitamente como "sin estado ni store"; hoy NO conoce gastos.
-- **La vista (`DashboardView.vue`)** orquesta: llama a las funciones puras dentro de `computed`, resuelve nombres contra los stores y pasa todo ya calculado como props a componentes presentacionales.
-- **Resolución de nombre de banco**: el precedente exacto está en `IngresosView.vue` — un helper local `nombreBanco(bancoId)` que lee `storeIngresos.bancos.find(...)?.nombre ?? 'Sin banco'`, y luego mapea los items añadiendo `nombreBanco` antes de pasarlos a la función pura `saldosPorBanco` (que excluye "No especificado" por nombre, case-insensitive).
-- **Componentes presentacionales puros**: `TarjetaBalanceMoneda.vue` ya declara en su docstring "Presentacional puro: recibe ya calculados los totales desde DashboardView". Importa `useMoneda().formatearMonto` (permitido: es formateo puro, no store), y no accede a ningún Pinia store.
-- **Ubicación de `banco_id`**: presente y obligatorio tanto en `Gasto` (`types/gasto.ts:52`) como en `Ingreso` (`types/ingreso.ts:23`). El catálogo `bancos` vive en `useIngresosStore().bancos` (compartido gastos+ingresos), se carga con `useBancos().cargarBancos()`.
+- **Lógica pura de dominio → funciones exportadas a nivel de módulo dentro de un archivo `useX.ts`.** No son "composables reactivos": reciben datos ya cargados y devuelven agregados. Precedentes: `cargarResumenPorMoneda`, `cargarGastoPorCategoria`, `cargarTendenciaMensual`, `cargarTendenciaDiaria`, `cargarBalancePorMoneda` (todas `export function` sueltas en `useDashboard.ts`, fuera de `useDashboard()`), y `calcularAbreviaturas` (exportada desde `useCategorias.ts`, con su propio `calcularAbreviaturas.spec.ts`). `useColorCategoria`/`useMoneda` son composables puros (sin estado ni store).
+- **Cada función pura tiene un `.spec.ts` en `src/<capa>/__tests__/`** (Vitest), con casos "camino feliz / borde / mayoría / vacío". Cobertura alta y sistemática.
+- **Componentes presentacionales puros** en `src/components/` reciben props ya calculadas y solo formatean/renderizan (`TarjetaResumenMoneda.vue`, `ListaGastoPorCategoria.vue`, `TarjetaBalanceMoneda.vue`), cada uno con su spec. Colores semánticos vía variables CSS `--color-error` (rojo) / `--color-exito` (verde), ya usados en `TarjetaResumenMoneda`.
+- **Las vistas** (`src/views/`) orquestan: cargan datos vía composables, derivan `computed`, resuelven nombres contra los stores y pasan props a los componentes. Historial e Ingresos son casi clones estructurales entre sí.
+- **Formato de fecha en filas hoy:** crudo — se imprime `gasto.fecha` / `ingreso.fecha` (`YYYY-MM-DD`) tal cual en los metadatos. No existe helper de formateo de fecha todavía.
+- **Zona horaria ya resuelta:** `useDashboard.ts` construye fechas con `new Date(anio, mes, dia)` y `getFullYear/getMonth/getDate`, NO `toISOString()`, a propósito, para evitar el desfase a UTC (ver comentario de `fechaDiaRelativo`). El agrupador debe seguir esa convención.
+- **Datos ya ordenados desc:** `store.gastos` (`.order` en `cargarGastos`), `store.ingresos` (`cargarIngresos`), y `filas`/`filasIngresos` (`.order('fecha', { ascending: false })`). El agrupador recibe items ya ordenados y NO reordena; el combinador del dashboard sí ordena (mezcla dos fuentes ordenadas por separado).
 
 ## Desviación de arquitectura
 
-- **¿Se necesita desviarse? NO.**
-- La feature encaja limpiamente en el patrón existente: nueva función pura de agregación en el composable de dominio + resolución de nombres en la vista + render en el componente presentacional vía una prop nueva. No cambia el modelo de datos, no introduce un patrón nuevo, no crea acoplamiento entre módulos. **No dispara GATE 1.**
-- Único ajuste transversal menor (dentro del patrón, no desviación): el Dashboard hoy no carga el catálogo de bancos; hay que añadir `useBancos().cargarBancos()` en su `onMounted`, exactamente como ya lo hace `IngresosView.vue`.
+- ¿Se necesita desviarse? **NO.**
+- Todo encaja en patrones ya establecidos:
+  - Funciones puras nuevas (`agruparPorFecha`, `etiquetaFecha`, `combinarUltimosMovimientos`) idénticas en forma a las funciones-módulo de `useDashboard.ts`/`useCategorias.ts`.
+  - Widget del dashboard = un componente presentacional más, como `ListaGastoPorCategoria`.
+  - Agrupado en el template = reestructurar el `v-for` existente (lista plana → grupos), sin tocar filtros, estados vacíos, totalizador ni stores.
+- **Sin cambios de modelo de datos, sin nueva ruta, sin nuevo patrón de estado. No dispara GATE 1.**
 
-## Decisión 1 — Dónde vive la función de agregación nueva
+### Decisiones de ubicación (justificadas)
 
-**Va en `useDashboard.ts`**, como función pura exportada `cargarBalanceNetoPorBanco`, junto a `cargarBalancePorMoneda`.
-
-Justificación:
-- `cargarBalancePorMoneda` ya vive ahí y ya combina las dos fuentes (`gastos` + `ingresos`) del mes restando una de otra. La nueva función es su hermana natural: misma combinación, pero desagregada por banco.
-- La ventana mensual de ambas fuentes (`filas`, `filasIngresos`) se origina en `useDashboard`. Es el dueño del dato.
-- `useMoneda.ts` está documentado como "sin estado ni store" y **solo agrega ingresos**; `saldosPorBanco` suma montos de una sola fuente sin signo. Meter lógica gasto-aware (resta con signo) ahí rompería su alcance declarado y su semántica ("saldos de Ingresos").
-- **Descartado reutilizar `saldosPorBanco` con montos firmados** (ingresos +, gastos −): funcionaría por coincidencia (el group-by banco+moneda y la exclusión de "No especificado" son idénticos), pero sería un hack semántico oculto — su docstring dice "suma los montos … de Ingresos" y ningún lector futuro esperaría que le pasen gastos negativos. Preferimos una función dedicada y bien nombrada.
-
-Firma propuesta (pura, sin store, siguiendo el precedente de `saldosPorBanco` en cuanto a exclusión por nombre):
-
-```ts
-export function cargarBalanceNetoPorBanco(
-  gastos: Gasto[],
-  ingresos: Ingreso[],
-  mes: string,                                // prefijo YYYY-MM del mes actual
-  nombreBanco: (bancoId: string) => string,   // resolver inyectado por la vista
-): Array<{ bancoId: string; nombreBanco: string; montosPorMoneda: Partial<Record<Moneda, number>> }>
-```
-
-Comportamiento (idéntico en convenciones a `saldosPorBanco`):
-- Filtra ambas fuentes a `mes.slice(0,7)`.
-- Acumula neto por `(bancoId, moneda)`: ingreso suma `+importe`, gasto resta `−(monto ?? 0)`. **Nunca mezcla PEN con USD.**
-- Excluye el banco cuyo `nombreBanco(bancoId).toLowerCase() === 'no especificado'` (mismo criterio, case-insensitive).
-- **Omite la combinación banco+moneda cuyo neto sea exactamente `0`** (clave ausente, no `0`) — igual que `saldosPorBanco`. OJO: aquí se **conservan los netos negativos** (a diferencia de `montoSinBancoPorMoneda` que descarta ≤0), porque un balance negativo debe mostrarse. La condición es `!== 0`, no `> 0`.
-- Descarta el banco entero si no le queda ninguna moneda.
-
-Nota sobre la constante `NOMBRE_BANCO_NO_ESPECIFICADO`: hoy es privada en `useMoneda.ts`. Para no duplicar el literal, **exportarla** desde `useMoneda.ts` e importarla en `useDashboard.ts` (fuente única de verdad). Alternativa aceptable si el builder prefiere no tocar `useMoneda`: redeclarar el literal local con un comentario que apunte a la migración 006 — pero la exportación es preferible.
-
-## Decisión 2 — Cómo resolver el nombre del banco en `TarjetaBalanceMoneda.vue`
-
-**La vista resuelve los nombres antes de pasarlos como prop. El componente sigue siendo presentacional puro (NO inyecta store de bancos).**
-
-- Se mantiene el patrón ya establecido en `TarjetaBalanceMoneda` (props ya calculadas) y en `IngresosView` (la vista mapea `nombreBanco` antes de llamar a la función pura).
-- `DashboardView` gana un helper `nombreBanco(bancoId)` idéntico al de `IngresosView` (leyendo `useIngresosStore().bancos`), lo inyecta a `cargarBalanceNetoPorBanco`, y el resultado ya trae `nombreBanco` resuelto por fila.
-- `TarjetaBalanceMoneda` recibe una prop nueva `desglosePorBanco` (array `{ bancoId, nombreBanco, montosPorMoneda }`) y solo la renderiza. Para formatear cada monto ya dispone de `formatearMonto` (import puro existente) — una fila por cada `(banco, moneda)` con su propia moneda, de modo que "S/ ..." y "$..." nunca se mezclan en la misma línea (esto es lo que produce las dos filas de "Interbank" de la captura).
+1. **`agruparPorFecha` + `etiquetaFecha` → nuevo `src/composables/useFechas.ts`** (composable de fechas genérico). NO en `useMoneda.ts` (mal fit: no es dinero), NO en un `useAgrupacionFecha.ts` demasiado específico.
+   - Justificación: `etiquetaFecha(fecha)` ("Hoy"/"Ayer"/"20 de julio") es un util de **formateo de fecha reutilizable por sí solo** (podría formatear también el metadato de fecha de cada fila, no solo el encabezado de grupo). Un nombre genérico `useFechas` deja lugar a futuros helpers de fecha sin crear un archivo por función. Sigue el patrón "funciones puras exportadas a nivel de módulo".
+2. **`combinarUltimosMovimientos` → dentro de `useDashboard.ts`** (export a nivel de módulo). NO en `useFechas.ts`.
+   - Justificación: es lógica **de dominio del Dashboard**: conoce las formas `Gasto`/`Ingreso`, produce el tipo unificado, y opera sobre `filas` + `filasIngresos`, las dos fuentes que `useDashboard` ya combina para el balance (`cargarBalancePorMoneda` ya mezcla gastos+ingresos). Ponerla en el composable de fechas acoplaría un helper genérico a dos tipos de dominio ajenos. El orden desc lo hace ella (mezcla dos arrays), no `agruparPorFecha`.
+3. **Tipo unificado `MovimientoUnificado`** (`{ tipo: 'gasto' | 'ingreso'; fecha; monto; descripcion; moneda; id }`) → exportado desde `useDashboard.ts` junto a la función (es su tipo de retorno; no amerita tocar `types/`).
+4. **Widget → nuevo presentacional `src/components/UltimosMovimientos.vue`** (prop `movimientos: MovimientoUnificado[]`, renderiza lista + filas, formatea monto/color/fecha internamente vía `useMoneda`+`useFechas`). Sigue el patrón de `ListaGastoPorCategoria`, mantiene `DashboardView` delgado. No hace falta un `FilaMovimiento.vue` aparte: la fila solo se usa aquí.
+5. **Link "Ver todos": OMITIDO.** No existe vista combinada de movimientos y el task prohíbe inventar ruta. Widget sin enlace de navegación (decisión explícita).
+6. **Posición del widget:** en `DashboardView`, **después de `<section class="seccion-resumen">` (3 tarjetas) y antes de `.selector-moneda-dashboard`**. UX: los totales del mes se leen primero (macro), y "últimos movimientos" es el vistazo rápido inmediato; queda por encima de los gráficos (análisis más profundo). El widget es independiente del `ToggleMoneda` (cada movimiento en su propia moneda), por eso va antes del toggle.
 
 ## Archivos a crear/modificar
 
-Chunks marcados; A y B no se solapan y pueden construirse en paralelo. C depende de A y B.
+**Chunk A — Feature 1 (agrupador). Independiente de B/C hasta el paso de vistas.**
+- `src/composables/useFechas.ts` — **crear** — exporta a nivel de módulo:
+  - `etiquetaFecha(fecha: string): string` → "Hoy" / "Ayer" / fecha larga `es-PE`. Construir `Date` con partes locales (`new Date(anio, mes-1, dia)`) para evitar desfase UTC; calcular "hoy"/"ayer" comparando strings `YYYY-MM-DD` derivados con `getFullYear/getMonth/getDate` (estilo `fechaDiaRelativo` de `useDashboard.ts`). Formato: `Intl.DateTimeFormat('es-PE', { day: 'numeric', month: 'long' })`; añadir `year: 'numeric'` solo si el año de la fecha ≠ año actual.
+  - `agruparPorFecha<T>(items: T[], obtenerFecha: (item: T) => string): Array<{ etiqueta: string; items: T[] }>` → agrupa consecutivos por día (`fecha.slice(0,10)`), preservando orden de entrada (NO reordena), etiqueta cada grupo con `etiquetaFecha`. Lista vacía → `[]`.
+- `src/composables/__tests__/useFechas.spec.ts` — **crear**.
 
-- **[Chunk A]** `src/composables/useMoneda.ts` — modificar — exportar la constante `NOMBRE_BANCO_NO_ESPECIFICADO` (cambiar de `const` privado a `export const`). Sin otros cambios funcionales.
-- **[Chunk A]** `src/composables/useDashboard.ts` — modificar — añadir función pura exportada `cargarBalanceNetoPorBanco` (ver firma arriba); importar `NOMBRE_BANCO_NO_ESPECIFICADO` desde `useMoneda`.
-- **[Chunk B]** `src/components/TarjetaBalanceMoneda.vue` — modificar — nueva prop opcional `desglosePorBanco: Array<{ bancoId: string; nombreBanco: string; montosPorMoneda: Partial<Record<Moneda, number>> }>` (default `[]`); markup: línea divisoria + lista `v-if="desglosePorBanco.length > 0"`, una fila por banco iterando `Object.entries(banco.montosPorMoneda)` con `formatearMonto(monto, moneda)`; color rojo/verde por signo del monto (reutilizar criterio `< 0`). Estilos scoped para el divisor y las filas.
-- **[Chunk C — depende de A y B]** `src/views/DashboardView.vue` — modificar —
-  1. importar `useBancos` y `useIngresosStore`; en `onMounted` añadir `cargarBancos()`.
-  2. helper `nombreBanco(bancoId)` (copia del de `IngresosView`).
-  3. `computed` `desgloseBalancePorBanco` que llama a `cargarBalanceNetoPorBanco(filas.value, filasIngresos.value, mesActual.value, nombreBanco)`.
-  4. pasar `:desglose-por-banco="desgloseBalancePorBanco"` a `<TarjetaBalanceMoneda>`.
-  5. **CSS del grid**: en `.seccion-resumen` añadir `align-items: start;` para que solo la tarjeta Balance crezca sin estirar las otras dos (hoy el grid no fija `align-items`, por lo que usa el `stretch` por defecto y las 3 columnas igualan altura).
+**Chunk B — Feature 2 lógica. Independiente de A.**
+- `src/composables/useDashboard.ts` — **modificar** — añadir el tipo `MovimientoUnificado` y la función pura exportada `combinarUltimosMovimientos(gastos: Gasto[], ingresos: Ingreso[], limite = 5): MovimientoUnificado[]` (mapea gasto → `{ tipo:'gasto', fecha, monto: g.monto ?? 0, descripcion: g.descripcion ?? '', moneda, id }`, ingreso → `{ tipo:'ingreso', fecha, monto: i.importe, descripcion: i.concepto, moneda, id }`, concatena, ordena por `fecha` desc con desempate determinista (p. ej. por `id`), `slice(0, limite)`). Gastos confirmados nunca traen `monto`/`moneda` null, pero tipar defensivo.
+- `src/composables/__tests__/useDashboard.spec.ts` — **modificar** — nuevo describe para `combinarUltimosMovimientos`.
 
-Tests (extender los specs existentes, mismo estilo con helpers `gastoDe`/`ingresoDe`):
-- `src/composables/__tests__/useDashboard.spec.ts` — casos de `cargarBalanceNetoPorBanco` (ver Plan de pruebas).
-- `src/components/__tests__/TarjetaBalanceMoneda.spec.ts` — render del desglose (filas por banco+moneda, negativos en rojo, lista ausente si vacío).
-- `src/views/__tests__/DashboardView.spec.ts` — que el desglose se pasa a la tarjeta con nombres resueltos y que se llama `cargarBancos`.
+**Chunk C — Feature 2 UI. Depende de B (tipo + función).**
+- `src/components/UltimosMovimientos.vue` — **crear** — presentacional puro. Prop `movimientos: MovimientoUnificado[]`. Por fila: indicador de tipo (icono/emoji o glifo con `aria-label`), `descripcion`, fecha vía `etiquetaFecha`, monto vía `useMoneda.formatearMonto` coloreado — rojo gasto (`--color-error`), verde ingreso (`--color-exito`). Estado vacío propio ("Aún no hay movimientos"). Sin link "Ver todos".
+- `src/components/__tests__/UltimosMovimientos.spec.ts` — **crear**.
+- `src/views/DashboardView.vue` — **modificar** — importar `combinarUltimosMovimientos`/`MovimientoUnificado` y `UltimosMovimientos.vue`; `computed` `ultimosMovimientos = combinarUltimosMovimientos(filas.value, filasIngresos.value, 5)`; insertar `<section>` con el widget tras `.seccion-resumen`.
+- `src/views/__tests__/DashboardView.spec.ts` — **modificar** — verificar render del widget con los últimos 5.
+
+**Chunk D — Feature 1 en vistas. Depende de A. D-Historial y D-Ingresos son chunks independientes entre sí (archivos distintos → paralelizables).**
+- `src/views/HistorialView.vue` — **modificar** — `computed` `gruposGastos = agruparPorFecha(gastosFiltrados.value, g => g.fecha)`; en el template, reemplazar la `<ul class="lista-gastos">` plana por un `v-for` de grupos: por grupo, un encabezado (`.encabezado-grupo-fecha` con `grupo.etiqueta`) + una `<ul>` con las filas de `grupo.items` (misma `fila-gasto` actual, sin cambios internos). Conservar intactos: filtros, `resumenGastos`, estados vacíos `sinGastos`/`sinResultadosPorFiltro`, guard `gastosFiltrados.length > 0`. Añadir estilo `.encabezado-grupo-fecha`.
+- `src/views/IngresosView.vue` — **modificar** — análogo: `gruposIngresos = agruparPorFecha(ingresosFiltrados.value, i => i.fecha)`; agrupar la `<ul class="lista-ingresos">`. Conservar desglose por banco, nota sin-banco, totalizador y estados vacíos.
+- `src/views/__tests__/HistorialView.spec.ts` / `IngresosView.spec.ts` (y sus `.integracion.spec.ts`) — **modificar/revisar** — actualizar asserts que asuman una única `<ul>` plana; añadir asserts de encabezados de grupo; verificar que los tests de integración siguen pasando.
 
 ## Plan de pruebas
 
-### Función pura `cargarBalanceNetoPorBanco` (unit, `useDashboard.spec.ts`)
-- **Un banco con una sola moneda**: 1 ingreso + 1 gasto mismo banco/moneda → una fila, neto = ingreso − gasto.
-- **Un banco con ambas monedas por separado**: movimientos PEN y USD del mismo banco → una entrada con `montosPorMoneda` de dos claves, cada una neta e independiente (nunca sumadas entre sí).
-- **Varios bancos**: netos correctos por banco, sin fugas cruzadas entre bancos.
-- **Exclusión de "No especificado"**: item cuyo `nombreBanco(...)` es "No especificado" (probar también "no especificado"/"NO ESPECIFICADO" para el case-insensitive) NO aparece.
-- **Banco con solo ingresos** → neto positivo = importe. **Banco con solo gastos** → neto negativo = −monto (se conserva, no se descarta).
-- **Saldo neto negativo**: gastos > ingresos → fila presente con valor negativo.
-- **Neto exactamente 0**: ingresos == gastos en esa moneda → esa moneda se omite; si es la única, el banco desaparece.
-- **Conjunto vacío**: `gastos=[]`, `ingresos=[]` → `[]`.
-- **Filtro de mes**: movimientos de otro mes dentro de la ventana de 6 meses NO cuentan.
-- **Monto nulo**: gasto con `monto: null` tratado como 0 (`?? 0`), no rompe.
+### `etiquetaFecha` / `agruparPorFecha` (`useFechas.spec.ts`)
+Fijar "hoy" con `vi.setSystemTime` (fecha determinista) para que hoy/ayer no dependan del reloj real.
+- **etiquetaFecha:**
+  - Hoy → "Hoy".
+  - Ayer → "Ayer".
+  - Ayer cruzando mes (hoy = día 1) → "Ayer" (valida aritmética local, no string).
+  - Fecha antigua **mismo año** → "20 de julio" (sin año).
+  - Fecha antigua **otro año** → incluye el año (ej. "20 de julio de 2024").
+  - Robustez TZ: `'2026-07-20'` NO cae al 19 (Date con partes locales; assert día = 20).
+- **agruparPorFecha:**
+  - Camino feliz: items de 3 días distintos ya ordenados desc → 3 grupos, etiquetas correctas, mismo orden.
+  - Todos el mismo día → 1 grupo con todos.
+  - Lista vacía → `[]`.
+  - No reordena: agrupa consecutivos tal cual los recibe (asume input ordenado).
+  - Genérico: funciona con `obtenerFecha` distinto (gasto.fecha vs ingreso.fecha) y con fechas que traen hora (`slice(0,10)`).
 
-### Componente `TarjetaBalanceMoneda` (`TarjetaBalanceMoneda.spec.ts`)
-- Camino feliz: dado `desglosePorBanco` con un banco de dos monedas, renderiza dos filas con nombre repetido y montos formateados con símbolo correcto (S/ vs $).
-- Borde: `desglosePorBanco` vacío/omitido → no renderiza la lista ni el divisor (no regresión de la tarjeta actual).
-- Neto negativo → fila con clase/color de error.
+### `combinarUltimosMovimientos` (`useDashboard.spec.ts`)
+- Orden correcto: mezcla gastos + ingresos por fecha desc, sin importar array de origen.
+- Empate de fecha (gasto e ingreso mismo día): ambos presentes, orden estable/determinista (assert reproducible).
+- Límite de 5: con >5 totales devuelve exactamente 5 (los más recientes).
+- Menos de 5: devuelve todos.
+- Solo gastos (ingresos vacío) → solo gastos ordenados.
+- Solo ingresos (gastos vacío) → solo ingresos.
+- Ambos vacíos → `[]`.
+- Mapeo de campos: `tipo` correcto, `descripcion` = `gasto.descripcion`/`ingreso.concepto`, `monto` = `gasto.monto`/`ingreso.importe`, moneda preservada.
 
-### Vista + grid (`DashboardView.spec.ts` + verificación visual manual)
-- La vista pasa a `TarjetaBalanceMoneda` el desglose con nombres ya resueltos desde `bancos`; se invoca `cargarBancos` en `onMounted`.
-- **Grid no estira "Gastado"/"Ingresos"**: con `align-items: start`, al crecer la tarjeta Balance las otras dos conservan su altura de contenido (no se estiran a la más alta). Verificar en desktop (3 columnas) y que en móvil (`max-width: 640px`, 1 columna) sigue apilado sin cambios.
+### `UltimosMovimientos.vue` (`UltimosMovimientos.spec.ts`)
+- Una fila por movimiento, en el orden recibido (no reordena).
+- Gasto → color rojo; ingreso → color verde.
+- Monto formateado según su propia moneda (PEN vs USD).
+- Fecha vía `etiquetaFecha` ("Hoy"/"Ayer"/larga).
+- Indicador de tipo accesible (aria-label o texto).
+- Prop vacía → estado vacío, sin filas.
+- Sin link "Ver todos".
 
-## Sugerencias fuera de alcance (NO incluir en este build)
-- Podría extraerse un helper compartido `nombreBanco(bancoId)` (hoy duplicado entre `IngresosView` y ahora `DashboardView`) — pero mantener el precedente local evita ampliar el alcance.
-- Igual que `saldosPorBanco` tiene su contraparte `montoSinBancoPorMoneda` ("Incluye … sin banco asignado"), el Dashboard podría más adelante mostrar el neto de "No especificado" como nota. No pedido aquí.
+### Render en las 3 vistas
+- **HistorialView:** gastos en 2 días → 2 encabezados de grupo + filas correctas; totalizador y filtros siguen; estados vacíos `sinGastos`/`sinResultadosPorFiltro` intactos.
+- **IngresosView:** análogo; además desglose por banco y nota "sin banco" siguen presentes.
+- **DashboardView:** widget tras la fila de resumen y antes del toggle; hasta 5 movimientos mezclados; dashboard sin datos → estado vacío del widget.
+
+## Sugerencias fuera de alcance (NO incluidas en este build)
+- El metadato de fecha cruda por fila (`· {{ gasto.fecha }}`) queda redundante con el encabezado de grupo; podría quitarse o formatearse con `etiquetaFecha`. Cosmético, no pedido.
+- `etiquetaFecha` podría más adelante centralizar TODO el formateo de fecha de la app. Reemplazo global fuera de alcance.

@@ -186,6 +186,61 @@ export function cargarBalancePorMoneda(
 }
 
 /**
+ * Movimiento (gasto o ingreso) unificado para el widget "Últimos
+ * movimientos" del Dashboard. Es el tipo de retorno de
+ * `combinarUltimosMovimientos`: no amerita tocar `types/`, ya que solo se usa
+ * para esta agregación.
+ */
+export interface MovimientoUnificado {
+  tipo: 'gasto' | 'ingreso'
+  fecha: string
+  monto: number
+  descripcion: string
+  moneda: Moneda
+  id: string
+}
+
+/**
+ * Mezcla `gastos` + `ingresos` en una sola lista de `MovimientoUnificado`,
+ * ordenada por fecha descendente (más reciente primero) y recortada a
+ * `limite`. A diferencia de `agruparPorFecha` (que asume input ya
+ * ordenado), esta función SÍ ordena: mezcla dos fuentes ordenadas por
+ * separado (`filas`/`filasIngresos`), igual que `cargarBalancePorMoneda` ya
+ * mezcla ambas fuentes para el balance neto. El desempate en fecha igual usa
+ * `id` (orden determinista y reproducible en los tests).
+ */
+export function combinarUltimosMovimientos(
+  gastos: Gasto[],
+  ingresos: Ingreso[],
+  limite = 5,
+): MovimientoUnificado[] {
+  const movimientosGastos: MovimientoUnificado[] = gastos.map((gasto) => ({
+    tipo: 'gasto',
+    fecha: gasto.fecha,
+    monto: gasto.monto ?? 0,
+    descripcion: gasto.descripcion ?? '',
+    moneda: gasto.moneda ?? 'PEN',
+    id: gasto.id,
+  }))
+
+  const movimientosIngresos: MovimientoUnificado[] = ingresos.map((ingreso) => ({
+    tipo: 'ingreso',
+    fecha: ingreso.fecha,
+    monto: ingreso.importe,
+    descripcion: ingreso.concepto,
+    moneda: ingreso.moneda,
+    id: ingreso.id,
+  }))
+
+  return [...movimientosGastos, ...movimientosIngresos]
+    .sort((a, b) => {
+      if (a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha)
+      return b.id.localeCompare(a.id)
+    })
+    .slice(0, limite)
+}
+
+/**
  * Composable de dominio del Dashboard (Épica 7). A diferencia de
  * `usePresupuestos` (que reutiliza `store.gastos` ya cargado por
  * `useGastos.cargarGastos`), el Dashboard consulta `gastos` directamente y

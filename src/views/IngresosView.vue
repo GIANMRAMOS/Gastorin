@@ -7,6 +7,7 @@ import { useIngresos } from '@/composables/useIngresos'
 import { useBancos } from '@/composables/useBancos'
 import { useIngresosStore } from '@/stores/ingresos'
 import { useMoneda } from '@/composables/useMoneda'
+import { agruparPorFecha } from '@/composables/useFechas'
 import type { Ingreso } from '@/types/ingreso'
 import type { Moneda } from '@/types/gasto'
 
@@ -64,6 +65,13 @@ const sinIngresos = computed(() => storeIngresos.ingresos.length === 0)
 const sinResultadosPorFiltro = computed(
   () => !sinIngresos.value && ingresosFiltrados.value.length === 0,
 )
+
+/**
+ * Ingresos filtrados agrupados por día. `ingresosFiltrados` ya viene
+ * ordenado desc (mismo orden de `store.ingresos`), así que el agrupador no
+ * reordena.
+ */
+const gruposIngresos = computed(() => agruparPorFecha(ingresosFiltrados.value, (ingreso) => ingreso.fecha))
 
 /** Totalizador de la moneda predominante sobre el conjunto ya filtrado. */
 const resumenIngresos = computed(() =>
@@ -183,24 +191,29 @@ async function confirmarEliminacion() {
       </p>
     </template>
 
-    <ul v-if="ingresosFiltrados.length > 0" class="lista-ingresos">
-      <li v-for="ingreso in ingresosFiltrados" :key="ingreso.id" class="fila-ingreso">
-        <div class="detalle-ingreso">
-          <p class="concepto-ingreso">{{ ingreso.concepto }}</p>
-          <p class="metadatos-ingreso">{{ nombreBanco(ingreso.banco_id) }} · {{ ingreso.fecha }}</p>
-        </div>
-        <p class="importe-ingreso">{{ formatearMonto(ingreso.importe, ingreso.moneda) }}</p>
+    <div v-if="ingresosFiltrados.length > 0" class="grupos-ingresos">
+      <div v-for="grupo in gruposIngresos" :key="grupo.etiqueta + grupo.items[0].id" class="grupo-fecha">
+        <h2 class="encabezado-grupo-fecha">{{ grupo.etiqueta }}</h2>
+        <ul class="lista-ingresos">
+          <li v-for="ingreso in grupo.items" :key="ingreso.id" class="fila-ingreso">
+            <div class="detalle-ingreso">
+              <p class="concepto-ingreso">{{ ingreso.concepto }}</p>
+              <p class="metadatos-ingreso">{{ nombreBanco(ingreso.banco_id) }} · {{ ingreso.fecha }}</p>
+            </div>
+            <p class="importe-ingreso">{{ formatearMonto(ingreso.importe, ingreso.moneda) }}</p>
 
-        <div class="acciones-ingreso">
-          <button type="button" class="enlace-secundario indicador-editar" @click="abrirModalEdicion(ingreso)">
-            Editar ›
-          </button>
-          <button type="button" class="enlace-secundario" @click="pedirConfirmacionEliminar(ingreso)">
-            Eliminar
-          </button>
-        </div>
-      </li>
-    </ul>
+            <div class="acciones-ingreso">
+              <button type="button" class="enlace-secundario indicador-editar" @click="abrirModalEdicion(ingreso)">
+                Editar ›
+              </button>
+              <button type="button" class="enlace-secundario" @click="pedirConfirmacionEliminar(ingreso)">
+                Eliminar
+              </button>
+            </div>
+          </li>
+        </ul>
+      </div>
+    </div>
 
     <div v-else-if="sinIngresos" class="estado-vacio estado-vacio-generico">
       <p class="mensaje-vacio">Todavía no hay ingresos registrados.</p>
@@ -256,6 +269,21 @@ async function confirmarEliminacion() {
   min-height: 44px;
   margin-top: 0;
   padding: 0 var(--espacio-4);
+}
+
+.grupos-ingresos {
+  display: flex;
+  flex-direction: column;
+  gap: var(--espacio-4);
+}
+
+.encabezado-grupo-fecha {
+  margin: 0 0 var(--espacio-2);
+  font-size: var(--tamano-pequeno);
+  font-weight: 700;
+  color: var(--color-texto-secundario);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .lista-ingresos {

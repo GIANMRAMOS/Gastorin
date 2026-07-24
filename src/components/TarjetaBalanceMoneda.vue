@@ -7,7 +7,6 @@ import type { Moneda } from '@/types/gasto'
  * Tarjeta de balance neto por moneda (Épica 11, HU-11.4): ingresos − gastos
  * del mes, coloreado según el signo. Presentacional puro: recibe ya
  * calculados los totales desde `DashboardView` (vía `cargarBalancePorMoneda`).
- * Único acceso a Ingresos en móvil, vía el enlace "Ver ingresos".
  */
 const props = withDefaults(
   defineProps<{
@@ -50,11 +49,9 @@ const montoSecundarioFormateado = computed(() => {
   <article class="tarjeta-balance-moneda">
     <p class="etiqueta-balance">Balance {{ moneda }}</p>
     <p class="monto-balance" :class="esNegativo ? 'balance-negativo' : 'balance-positivo'">
-      <span aria-hidden="true">{{ esNegativo ? '▼' : '▲' }}</span>
       {{ balanceFormateado }}
     </p>
     <p v-if="mostrarInsignia" class="insignia-secundaria">{{ montoSecundarioFormateado }}</p>
-    <router-link :to="{ name: 'ingresos' }" class="enlace-ver-ingresos">Ver ingresos</router-link>
   </article>
 </template>
 
@@ -88,17 +85,6 @@ const montoSecundarioFormateado = computed(() => {
 
 .balance-negativo {
   color: var(--color-error);
-}
-
-.enlace-ver-ingresos {
-  margin-top: var(--espacio-1);
-  font-size: var(--tamano-pequeno);
-  font-weight: 600;
-  color: var(--color-primario);
-  text-decoration: none;
-}
-.enlace-ver-ingresos:hover {
-  text-decoration: underline;
 }
 
 .insignia-secundaria {

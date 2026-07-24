@@ -6,6 +6,7 @@ import {
   cargarTendenciaMensual,
   cargarTendenciaDiaria,
   cargarBalancePorMoneda,
+  combinarUltimosMovimientos,
   useDashboard,
 } from '@/composables/useDashboard'
 import { useGastosStore } from '@/stores/gastos'
@@ -347,6 +348,104 @@ describe('useDashboard', () => {
       const balance = cargarBalancePorMoneda(gastos, ingresos, '2026-07-01')
 
       expect(balance.PEN).toEqual({ ingresos: 0, gastos: 0, balance: 0 })
+    })
+  })
+
+  describe('combinarUltimosMovimientos', () => {
+    it('camino feliz: mezcla gastos e ingresos por fecha desc, sin importar el array de origen', () => {
+      const gastos = [gastoDe({ id: 'g1', fecha: '2026-07-18' })]
+      const ingresos = [ingresoDe({ id: 'i1', fecha: '2026-07-20' }), ingresoDe({ id: 'i2', fecha: '2026-07-15' })]
+
+      const movimientos = combinarUltimosMovimientos(gastos, ingresos)
+
+      expect(movimientos.map((m) => m.id)).toEqual(['i1', 'g1', 'i2'])
+    })
+
+    it('borde: empate de fecha entre gasto e ingreso -> ambos presentes, orden determinista por id', () => {
+      const gastos = [gastoDe({ id: 'g-empate', fecha: '2026-07-20' })]
+      const ingresos = [ingresoDe({ id: 'i-empate', fecha: '2026-07-20' })]
+
+      const movimientos = combinarUltimosMovimientos(gastos, ingresos)
+
+      expect(movimientos).toHaveLength(2)
+      // Desempate determinista: mayor id (localeCompare) primero.
+      expect(movimientos.map((m) => m.id)).toEqual(['i-empate', 'g-empate'])
+
+      // Reproducible: mismo input, mismo resultado.
+      expect(combinarUltimosMovimientos(gastos, ingresos).map((m) => m.id)).toEqual(['i-empate', 'g-empate'])
+    })
+
+    it('límite: con más de 5 movimientos en total, devuelve exactamente los 5 más recientes', () => {
+      const gastos = [
+        gastoDe({ id: 'g1', fecha: '2026-07-01' }),
+        gastoDe({ id: 'g2', fecha: '2026-07-02' }),
+        gastoDe({ id: 'g3', fecha: '2026-07-03' }),
+      ]
+      const ingresos = [
+        ingresoDe({ id: 'i1', fecha: '2026-07-04' }),
+        ingresoDe({ id: 'i2', fecha: '2026-07-05' }),
+        ingresoDe({ id: 'i3', fecha: '2026-07-06' }),
+      ]
+
+      const movimientos = combinarUltimosMovimientos(gastos, ingresos)
+
+      expect(movimientos).toHaveLength(5)
+      expect(movimientos.map((m) => m.id)).toEqual(['i3', 'i2', 'i1', 'g3', 'g2'])
+    })
+
+    it('menos de 5 movimientos en total: devuelve todos', () => {
+      const gastos = [gastoDe({ id: 'g1', fecha: '2026-07-01' })]
+      const ingresos = [ingresoDe({ id: 'i1', fecha: '2026-07-02' })]
+
+      const movimientos = combinarUltimosMovimientos(gastos, ingresos)
+
+      expect(movimientos).toHaveLength(2)
+    })
+
+    it('borde: solo gastos (ingresos vacío) -> solo gastos ordenados', () => {
+      const gastos = [gastoDe({ id: 'g1', fecha: '2026-07-01' }), gastoDe({ id: 'g2', fecha: '2026-07-05' })]
+
+      const movimientos = combinarUltimosMovimientos(gastos, [])
+
+      expect(movimientos.map((m) => m.id)).toEqual(['g2', 'g1'])
+      expect(movimientos.every((m) => m.tipo === 'gasto')).toBe(true)
+    })
+
+    it('borde: solo ingresos (gastos vacío) -> solo ingresos', () => {
+      const ingresos = [ingresoDe({ id: 'i1', fecha: '2026-07-01' })]
+
+      const movimientos = combinarUltimosMovimientos([], ingresos)
+
+      expect(movimientos.map((m) => m.id)).toEqual(['i1'])
+      expect(movimientos.every((m) => m.tipo === 'ingreso')).toBe(true)
+    })
+
+    it('borde: ambos arrays vacíos -> []', () => {
+      expect(combinarUltimosMovimientos([], [])).toEqual([])
+    })
+
+    it('mapeo de campos: tipo, descripcion, monto y moneda correctos para gasto e ingreso', () => {
+      const gasto = gastoDe({ id: 'g1', fecha: '2026-07-10', descripcion: 'Taxi', monto: 25, moneda: 'USD' })
+      const ingreso = ingresoDe({ id: 'i1', fecha: '2026-07-01', concepto: 'Sueldo', importe: 1500, moneda: 'PEN' })
+
+      const [movimientoGasto, movimientoIngreso] = combinarUltimosMovimientos([gasto], [ingreso])
+
+      expect(movimientoGasto).toEqual({
+        tipo: 'gasto',
+        fecha: '2026-07-10',
+        monto: 25,
+        descripcion: 'Taxi',
+        moneda: 'USD',
+        id: 'g1',
+      })
+      expect(movimientoIngreso).toEqual({
+        tipo: 'ingreso',
+        fecha: '2026-07-01',
+        monto: 1500,
+        descripcion: 'Sueldo',
+        moneda: 'PEN',
+        id: 'i1',
+      })
     })
   })
 

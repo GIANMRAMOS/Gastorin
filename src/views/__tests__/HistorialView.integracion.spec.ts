@@ -188,6 +188,20 @@ describe('HistorialView — fila del historial (HU-3.1)', () => {
     expect(wrapper.find('[role="dialog"] h2').text()).toBe('Editar gasto')
   })
 
+  it('agrupado por fecha: cada gasto de un día distinto queda bajo su propio encabezado de grupo', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    const encabezados = wrapper.findAll('.encabezado-grupo-fecha')
+    expect(encabezados).toHaveLength(3) // 3 gastos, 3 días distintos (10 jul, 15 jul, 1 jun)
+    expect(encabezados.map((e) => e.text())).toEqual(['10 de julio', '15 de julio', '1 de junio'])
+
+    // Filtros, totalizador y filas siguen intactos con el agrupado activo.
+    expect(wrapper.findComponent({ name: 'FiltrosHistorial' }).exists()).toBe(true)
+    expect(wrapper.find('.resumen-totalizador').exists()).toBe(true)
+    expect(wrapper.findAll('.fila-gasto')).toHaveLength(3)
+  })
+
   it('estado vacío genérico: sin ningún gasto, se muestra el mensaje genérico con CTA "Nuevo gasto" que abre el modal de alta', async () => {
     mockearCargaInicial({ gastos: [] })
     const wrapper = mount(HistorialView)
