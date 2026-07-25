@@ -55,4 +55,29 @@ describe('ToggleMoneda', () => {
     expect(botones[0].classes()).not.toContain('activo')
     expect(botones[1].classes()).not.toContain('activo')
   })
+
+  it('sin mostrarSimbolo (default), los botones muestran solo el código de moneda (uso en formularios)', () => {
+    const wrapper = mount(ToggleMoneda, { props: { modelValue: '' } })
+    const botones = wrapper.findAll('button')
+
+    expect(botones[0].text()).toBe('PEN')
+    expect(botones[1].text()).toBe('USD')
+  })
+
+  it('con mostrarSimbolo=true (header "Caudal"), los botones muestran el símbolo junto al código', () => {
+    const wrapper = mount(ToggleMoneda, { props: { modelValue: '', mostrarSimbolo: true } })
+    const botones = wrapper.findAll('button')
+
+    expect(botones[0].text()).toBe('S/ PEN')
+    expect(botones[1].text()).toBe('$ USD')
+  })
+
+  it('con mostrarSimbolo=true, el click y el estado activo siguen funcionando igual (mismos índices/clase/emit)', async () => {
+    const wrapper = mount(ToggleMoneda, { props: { modelValue: 'PEN', mostrarSimbolo: true } })
+
+    expect(wrapper.findAll('button')[0].classes()).toContain('activo')
+
+    await wrapper.findAll('button')[1].trigger('click')
+    expect(wrapper.emitted('update:modelValue')).toEqual([['USD']])
+  })
 })

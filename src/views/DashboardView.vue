@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import TarjetaResumenMoneda from '@/components/TarjetaResumenMoneda.vue'
-import TarjetaBalanceMoneda from '@/components/TarjetaBalanceMoneda.vue'
+import TarjetaKpi from '@/components/TarjetaKpi.vue'
+import TarjetaPresupuestoResumen from '@/components/TarjetaPresupuestoResumen.vue'
+import TarjetaSaldosPorCuenta from '@/components/TarjetaSaldosPorCuenta.vue'
+import TarjetaBandejaResumen from '@/components/TarjetaBandejaResumen.vue'
+import FeedMovimientos, { type MovimientoFeed } from '@/components/FeedMovimientos.vue'
+import ChipsFiltroTipo from '@/components/ChipsFiltroTipo.vue'
 import ListaGastoPorCategoria from '@/components/ListaGastoPorCategoria.vue'
 import GraficoTendenciaMensual from '@/components/GraficoTendenciaMensual.vue'
 import GraficoTendenciaDiaria from '@/components/GraficoTendenciaDiaria.vue'
-import UltimosMovimientos from '@/components/UltimosMovimientos.vue'
 import ToggleMoneda from '@/components/ToggleMoneda.vue'
 import {
   useDashboard,
@@ -14,34 +17,61 @@ import {
   cargarTendenciaMensual,
   cargarTendenciaDiaria,
   cargarBalancePorMoneda,
-  combinarUltimosMovimientos,
+  calcularSaldoNetoPorCuenta,
+  combinarMovimientosDelMes,
+  proyeccionCierreMes,
+  type TipoFiltroMovimiento,
 } from '@/composables/useDashboard'
 import { useCategorias } from '@/composables/useCategorias'
+import { usePresupuestos } from '@/composables/usePresupuestos'
+import { useBandeja } from '@/composables/useBandeja'
+import { NOMBRE_BANCO_NO_ESPECIFICADO } from '@/composables/useMoneda'
 import { useGastosStore } from '@/stores/gastos'
+import { useIngresosStore } from '@/stores/ingresos'
+import { useUiStore } from '@/stores/ui'
 import type { Moneda } from '@/types/gasto'
 
 /**
- * Dashboard (Épica 7): resumen del mes por moneda (HU-7.1, siempre ambas
- * monedas), gasto por categoría (HU-7.2), tendencia mensual (HU-7.3) y
- * tendencia diaria de los últimos 30 días —estas tres últimas gobernadas por
- * un único `ToggleMoneda` compartido— y balance neto por moneda (Épica 11,
- * HU-11.4). Es la nueva home de la app (ruta raíz redirige aquí, ver
- * `router/index.ts`).
- *
- * La fila de resumen consolida Gastado/Ingresos/Balance en 3 tarjetas (una
- * fila), cada una con el monto principal en PEN y el equivalente en USD como
- * insignia secundaria (props `montoSecundario`/`monedaSecundaria`).
+ * "Dashboard" (rediseño "Caudal", Fase 1: Shell + Dashboard): encabezado con
+ * mes + toggle de moneda + "+ Registrar", 3 KPIs (Ingresos/Egresos/Balance),
+ * strip "Saldo por cuenta" (BCP/IBK, ajuste de alcance posterior a la Fase 1),
+ * y una grilla de 2 columnas
+ * con el Historial del mes (izquierda) y Presupuesto + Bandeja (derecha) —
+ * todo gobernado por el mismo selector de moneda del encabezado—; debajo se
+ * conservan el gasto por categoría (HU-7.2) y las tendencias mensual
+ * (HU-7.3) y diaria de los últimos 30 días (se mudarán a la sección
+ * "Gráficos" en la Fase 5 del rediseño, no se borran en esta fase). Es la
+ * home de la app (ruta raíz redirige aquí, ver `router/index.ts`); el name
+ * de ruta sigue siendo `dashboard`.
  */
 const { filas, filasIngresos, cargarDatosDashboard } = useDashboard()
 const { cargarCategorias } = useCategorias()
-const store = useGastosStore()
+const { cargarPresupuestos } = usePresupuestos()
+const { cargarBorradores } = useBandeja()
+const storeGastos = useGastosStore()
+const storeIngresos = useIngresosStore()
+const storeUi = useUiStore()
 
-/** Moneda que gobiernan a la vez el gasto por categoría y la tendencia mensual. */
+/** Moneda que gobierna a la vez los KPIs, el presupuesto, el feed, el gasto por categoría y las tendencias. */
 const monedaSeleccionada = ref<Moneda>('PEN')
 
+/** Filtro de tipo de movimiento del feed (chips Todos/Ingresos/Egresos). */
+const tipoFiltro = ref<TipoFiltroMovimiento>('todos')
+
+/**
+ * Hidrata, además de categorías y gastos/ingresos del mes, los presupuestos
+ * (Épica 6, `usePresupuestos`) y los borradores de la bandeja (Épica 5,
+ * `useBandeja`): sin esto, el resumen de presupuesto y la card de bandeja
+ * dependían de que el usuario hubiera visitado antes Presupuestos/Bandeja en
+ * la misma sesión (mismo bug de fondo que ya se corrigió para bancos/
+ * categorías en `AppShellLayout.vue`). Reutiliza los mismos composables que
+ * `PresupuestosView.vue`/`BandejaView.vue`, sin reimplementar la consulta.
+ */
 onMounted(() => {
   cargarCategorias()
   cargarDatosDashboard()
+  cargarPresupuestos()
+  cargarBorradores()
 })
 
 /** Primer día del mes actual (`YYYY-MM-01`), base de las agregaciones "mes actual". */
@@ -52,22 +82,92 @@ const mesActual = computed(() => {
   return `${anio}-${mes}-01`
 })
 
+/** Día del mes actual (1-31): base del subtítulo del encabezado y de la proyección de cierre de mes. */
+const diaActual = computed(() => new Date().getDate())
+
+/** Cantidad de días del mes actual (28-31): base del subtítulo y de la proyección de cierre de mes. */
+const diasDelMes = computed(() => {
+  const ahora = new Date()
+  return new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0).getDate()
+})
+
+/**
+ * Mes y año del encabezado ("Julio 2026"), capitalizado. Se formatea solo el
+ * mes con `Intl` (en minúscula) y se concatena el año a mano: el formato
+ * combinado `{month:'long', year:'numeric'}` de `Intl` en es-PE inserta un
+ * "de" ("julio de 2026") que no calza con el encabezado deseado.
+ */
+const mesFormateado = computed(() => {
+  const ahora = new Date()
+  const nombreMes = new Intl.DateTimeFormat('es-PE', { month: 'long' }).format(ahora)
+  return `${nombreMes.charAt(0).toUpperCase()}${nombreMes.slice(1)} ${ahora.getFullYear()}`
+})
+
+/** Subtítulo del encabezado: "día D de N · X cuentas" (X = bancos, ya hidratados por `AppShellLayout`). */
+const subtitulo = computed(
+  () => `día ${diaActual.value} de ${diasDelMes.value} · ${storeIngresos.bancos.length} cuentas`,
+)
+
+/** Cantidad de borradores pendientes en la bandeja, base de la card "Bandeja de correo". */
+const cantidadBorradores = computed(() => storeGastos.borradores.length)
+
+/** Primer borrador de la bandeja (el más reciente), o `null` si está al día: base del peek de la card. */
+const peekBorrador = computed(() => storeGastos.borradores[0] ?? null)
+
 /** Resumen de gasto del mes actual por moneda (PEN y USD), independiente del toggle. */
 const resumenPorMoneda = computed(() => cargarResumenPorMoneda(filas.value, mesActual.value))
 
-/** Balance neto (ingresos − gastos) del mes actual por moneda (PEN y USD). */
+/**
+ * Saldo neto (ingresos − gastos) de las cuentas BCP e IBK para el strip
+ * "Saldo por cuenta": usa `filas`/`filasIngresos` (ventana de 6 meses ya
+ * cargada por `cargarDatosDashboard`) y `storeIngresos.bancos` (catálogo ya
+ * hidratado por `AppShellLayout`), sin fetch propio. Independiente del
+ * toggle de moneda del encabezado (siempre PEN + badge USD si aplica, ver
+ * `calcularSaldoNetoPorCuenta`).
+ */
+const saldosPorCuenta = computed(() =>
+  calcularSaldoNetoPorCuenta(storeIngresos.bancos, filas.value, filasIngresos.value),
+)
+
+/** Balance neto (ingresos − gastos) del mes actual por moneda (PEN y USD): fuente directa de los KPIs. */
 const balancePorMoneda = computed(() =>
   cargarBalancePorMoneda(filas.value, filasIngresos.value, mesActual.value),
 )
 
-/** Gasto por categoría del mes actual en la moneda seleccionada, con nombre resuelto desde el store. */
+/**
+ * Límite total de presupuesto del mes en la moneda seleccionada: suma de
+ * `storeGastos.presupuestos` (Épica 6, hidratado por `cargarPresupuestos()`
+ * en el `onMounted` de esta vista) filtrados por moneda. Si el usuario no
+ * tiene presupuestos configurados, queda en 0 y la tarjeta lo maneja sin
+ * dividir por cero (mismo criterio que `TarjetaPresupuesto`).
+ */
+const presupuestoLimite = computed(() =>
+  storeGastos.presupuestos
+    .filter((presupuesto) => presupuesto.moneda === monedaSeleccionada.value)
+    .reduce((total, presupuesto) => total + presupuesto.monto_limite, 0),
+)
+
+/** Gastado del mes en la moneda seleccionada (reutiliza el mismo total ya calculado para los KPIs). */
+const presupuestoGastado = computed(() => resumenPorMoneda.value[monedaSeleccionada.value].total)
+
+/** Proyección de cierre de mes a partir de lo gastado hasta hoy, extrapolado linealmente. */
+const presupuestoProyeccion = computed(() =>
+  proyeccionCierreMes(presupuestoGastado.value, diaActual.value, diasDelMes.value),
+)
+
+/** Gasto por categoría del mes actual en la moneda seleccionada, con nombre resuelto desde el store (ya viene ordenado de mayor a menor, ver `cargarGastoPorCategoria`). */
 const gastoPorCategoria = computed(() => {
   const totales = cargarGastoPorCategoria(filas.value, mesActual.value, monedaSeleccionada.value)
   return totales.map((item) => {
-    const categoria = store.categorias.find((c) => c.id === item.categoria_id)
+    const categoria = storeGastos.categorias.find((c) => c.id === item.categoria_id)
     return { categoria_id: item.categoria_id, nombre: categoria?.nombre ?? 'Categoría', total: item.total }
   })
 })
+
+/** Top-3 categorías de gasto del mes (mismo orden desc de `gastoPorCategoria`), para las mini-barras de `TarjetaPresupuestoResumen`. */
+const topCategorias = computed(() =>
+  gastoPorCategoria.value.slice(0, 3).map(({ nombre, total }) => ({ nombre, total })),
+)
 
 /** Tendencia de los últimos 6 meses en la moneda seleccionada. */
 const tendenciaMensual = computed(() => cargarTendenciaMensual(filas.value, monedaSeleccionada.value))
@@ -75,50 +175,96 @@ const tendenciaMensual = computed(() => cargarTendenciaMensual(filas.value, mone
 /** Tendencia de los últimos 30 días en la moneda seleccionada (misma ventana de `filas`, sin fetch nuevo). */
 const tendenciaDiaria = computed(() => cargarTendenciaDiaria(filas.value, monedaSeleccionada.value))
 
-/** Últimos 5 movimientos (gastos + ingresos mezclados), independiente del toggle de moneda. */
-const ultimosMovimientos = computed(() => combinarUltimosMovimientos(filas.value, filasIngresos.value, 5))
+/** Movimientos del mes en la moneda y tipo seleccionados (chips), sin tope: el feed muestra TODO el mes. */
+const movimientosDelMes = computed(() =>
+  combinarMovimientosDelMes(
+    filas.value,
+    filasIngresos.value,
+    mesActual.value,
+    monedaSeleccionada.value,
+    tipoFiltro.value,
+  ),
+)
+
+/**
+ * Feed enriquecido con el nombre de categoría (solo en gastos: un ingreso
+ * nunca tiene `categoriaId`) y el nombre de banco, resueltos contra
+ * `storeGastos.categorias`/`storeIngresos.bancos`.
+ */
+const movimientosEnriquecidos = computed<MovimientoFeed[]>(() =>
+  movimientosDelMes.value.map((movimiento) => ({
+    ...movimiento,
+    nombreCategoria: movimiento.categoriaId
+      ? storeGastos.categorias.find((c) => c.id === movimiento.categoriaId)?.nombre ?? 'Categoría'
+      : null,
+    nombreBanco:
+      storeIngresos.bancos.find((banco) => banco.id === movimiento.bancoId)?.nombre ??
+      NOMBRE_BANCO_NO_ESPECIFICADO,
+  })),
+)
 </script>
 
 <template>
-  <main class="pagina-dashboard">
-    <h1>Dashboard</h1>
+  <main class="pagina-inicio">
+    <header class="encabezado-inicio">
+      <div class="titulo-encabezado">
+        <h1>{{ mesFormateado }}</h1>
+        <p class="subtitulo-encabezado">{{ subtitulo }}</p>
+      </div>
+      <div class="acciones-encabezado">
+        <ToggleMoneda v-model="monedaSeleccionada" mostrar-simbolo />
+        <button type="button" class="boton-registrar" @click="storeUi.abrirHojaAcciones()">
+          + Registrar
+        </button>
+      </div>
+    </header>
 
-    <p v-if="store.error" role="alert" class="mensaje-error">{{ store.error }}</p>
+    <p v-if="storeGastos.error" role="alert" class="mensaje-error">{{ storeGastos.error }}</p>
 
-    <section class="seccion-resumen">
-      <TarjetaResumenMoneda
-        moneda="PEN"
-        etiqueta="Gastado este mes"
-        :total="resumenPorMoneda.PEN.total"
-        :variacion-pct="resumenPorMoneda.PEN.variacionPct"
-        :monto-secundario="resumenPorMoneda.USD.total"
-        moneda-secundaria="USD"
+    <div class="fila-kpis">
+      <TarjetaKpi
+        label="Ingresos"
+        :monto="balancePorMoneda[monedaSeleccionada].ingresos"
+        :moneda="monedaSeleccionada"
+        variante="ingreso"
       />
-      <TarjetaResumenMoneda
-        moneda="PEN"
-        etiqueta="Ingresos este mes"
-        :total="balancePorMoneda.PEN.ingresos"
-        :variacion-pct="null"
-        :monto-secundario="balancePorMoneda.USD.ingresos"
-        moneda-secundaria="USD"
+      <TarjetaKpi
+        label="Egresos"
+        :monto="balancePorMoneda[monedaSeleccionada].gastos"
+        :moneda="monedaSeleccionada"
+        variante="egreso"
       />
-      <TarjetaBalanceMoneda
-        moneda="PEN"
-        :ingresos="balancePorMoneda.PEN.ingresos"
-        :gastos="balancePorMoneda.PEN.gastos"
-        :balance="balancePorMoneda.PEN.balance"
-        :monto-secundario="balancePorMoneda.USD.balance"
-        moneda-secundaria="USD"
+      <TarjetaKpi
+        label="Balance"
+        :monto="balancePorMoneda[monedaSeleccionada].balance"
+        :moneda="monedaSeleccionada"
+        variante="balance"
+        mostrar-signo
       />
-    </section>
+    </div>
 
-    <section class="seccion-dashboard">
-      <h2>Últimos movimientos</h2>
-      <UltimosMovimientos :movimientos="ultimosMovimientos" />
-    </section>
+    <TarjetaSaldosPorCuenta :cuentas="saldosPorCuenta" />
 
-    <div class="selector-moneda-dashboard">
-      <ToggleMoneda v-model="monedaSeleccionada" />
+    <div class="grid-inicio">
+      <section class="columna-historial">
+        <div class="cabecera-seccion-feed">
+          <h2>Historial</h2>
+          <ChipsFiltroTipo v-model="tipoFiltro" />
+        </div>
+        <FeedMovimientos :movimientos="movimientosEnriquecidos" />
+      </section>
+
+      <div class="columna-lateral-inicio">
+        <TarjetaPresupuestoResumen
+          :gastado="presupuestoGastado"
+          :limite="presupuestoLimite"
+          :proyeccion="presupuestoProyeccion"
+          :moneda="monedaSeleccionada"
+          :top-categorias="topCategorias"
+        />
+
+        <TarjetaBandejaResumen :cantidad="cantidadBorradores" :peek="peekBorrador" />
+      </div>
     </div>
 
     <section class="seccion-dashboard">
@@ -126,6 +272,7 @@ const ultimosMovimientos = computed(() => combinarUltimosMovimientos(filas.value
       <ListaGastoPorCategoria :items="gastoPorCategoria" :moneda="monedaSeleccionada" />
     </section>
 
+    <!-- Se muda a la sección "Gráficos" en la Fase 5 del rediseño "Caudal"; se conserva aquí hasta entonces. -->
     <section class="seccion-dashboard">
       <h2>Tendencia mensual</h2>
       <GraficoTendenciaMensual :datos="tendenciaMensual" :moneda="monedaSeleccionada" />
@@ -139,34 +286,100 @@ const ultimosMovimientos = computed(() => combinarUltimosMovimientos(filas.value
 </template>
 
 <style scoped>
-.pagina-dashboard {
-  max-width: 720px;
+.pagina-inicio {
+  max-width: 1080px;
   margin: 0 auto;
   padding: var(--espacio-6) var(--espacio-4);
 }
 
-.pagina-dashboard h1 {
-  font-size: clamp(20px, 4vw, 26px);
-  margin: 0 0 var(--espacio-6);
-}
-
-.seccion-resumen {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: var(--espacio-3);
+.encabezado-inicio {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--espacio-4);
   margin-bottom: var(--espacio-6);
 }
 
-@media (max-width: 640px) {
-  .seccion-resumen {
-    grid-template-columns: 1fr;
-  }
+.titulo-encabezado h1 {
+  margin: 0;
+  font-weight: 600;
+  font-size: 21px;
+  letter-spacing: -0.02em;
 }
 
-.selector-moneda-dashboard {
+.subtitulo-encabezado {
+  margin: var(--espacio-1) 0 0;
+  font-weight: 400;
+  font-size: 12.5px;
+  color: rgba(0, 0, 0, 0.5);
+}
+
+.acciones-encabezado {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  gap: var(--espacio-3);
+  flex-shrink: 0;
+}
+
+.boton-registrar {
+  min-height: 40px;
+  padding: 0 var(--espacio-4);
+  background: #1a1a18;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  font-weight: 600;
+  font-size: var(--tamano-pequeno);
+  cursor: pointer;
+  font-family: var(--fuente-base);
+}
+.boton-registrar:hover {
+  background: var(--color-primario-hover);
+}
+
+.mensaje-error {
   margin-bottom: var(--espacio-4);
+}
+
+.fila-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: var(--espacio-4);
+}
+
+.grid-inicio {
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: 16px;
+  align-items: start;
+  margin: var(--espacio-4) 0;
+}
+
+.columna-historial {
+  background: var(--color-fondo);
+  border: 1px solid var(--color-borde-tarjeta);
+  border-radius: var(--radio-tarjeta);
+  padding: var(--espacio-4);
+}
+
+.columna-lateral-inicio {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cabecera-seccion-feed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--espacio-3);
+  margin-bottom: var(--espacio-4);
+}
+
+.cabecera-seccion-feed h2 {
+  margin: 0;
+  font-size: 1rem;
 }
 
 .seccion-dashboard {
@@ -180,5 +393,15 @@ const ultimosMovimientos = computed(() => combinarUltimosMovimientos(filas.value
 .seccion-dashboard h2 {
   margin: 0 0 var(--espacio-4);
   font-size: 1rem;
+}
+
+@media (max-width: 900px) {
+  .fila-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .grid-inicio {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

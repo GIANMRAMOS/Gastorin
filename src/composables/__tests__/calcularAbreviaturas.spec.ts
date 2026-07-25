@@ -11,6 +11,7 @@ function crearCategoria(nombre: string, id = nombre): Categoria {
     id,
     usuario_id: 'u1',
     nombre,
+    tipo: 'gasto',
     predefinida: true,
     activa: true,
     creado_en: '',

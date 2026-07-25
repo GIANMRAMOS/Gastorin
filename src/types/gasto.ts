@@ -6,6 +6,15 @@
 /** Moneda soportada por un gasto o presupuesto. */
 export type Moneda = 'PEN' | 'USD'
 
+/**
+ * Tipo de una categoría: separa el catálogo de Gasto del de Ingreso (Épica
+ * 12, migración `008_categorias_tipo_e_ingresos_categoria.sql`). El `tipo` se
+ * INFIERE del contexto de apertura del formulario (el usuario no lo elige):
+ * gestión de gasto / `FormularioGasto` → `'gasto'`; alta de Ingreso →
+ * `'ingreso'`.
+ */
+export type TipoCategoria = 'gasto' | 'ingreso'
+
 /** Origen del gasto: alta manual del usuario o detectado desde un correo. */
 export type OrigenGasto = 'manual' | 'correo'
 
@@ -22,6 +31,13 @@ export interface Categoria {
   id: string
   usuario_id: string
   nombre: string
+  /**
+   * Separa el catálogo de Gasto del de Ingreso (migración `008`). La
+   * unicidad de `nombre` ahora es por `(usuario_id, nombre, tipo)`: un mismo
+   * nombre puede repetirse entre tipos distintos (ej. "Otros" de gasto y
+   * "Otros" de ingreso).
+   */
+  tipo: TipoCategoria
   predefinida: boolean
   activa: boolean
   creado_en: string

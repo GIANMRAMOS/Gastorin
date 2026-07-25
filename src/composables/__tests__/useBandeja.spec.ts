@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, type Mock } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { useBandeja } from '@/composables/useBandeja'
+import { calcularPosiblesDuplicados, useBandeja } from '@/composables/useBandeja'
 import { useGastosStore } from '@/stores/gastos'
 import { useAuthStore } from '@/stores/auth'
 import { supabase } from '@/lib/supabaseClient'
@@ -338,6 +338,54 @@ describe('useBandeja', () => {
       const resultado = await cargarEstadoIngesta()
 
       expect(resultado).toBeNull()
+    })
+  })
+
+  describe('calcularPosiblesDuplicados (HU-14.2)', () => {
+    it('camino feliz: mismo monto + mismo banco + fecha a 3 días o menos → ambos marcados', () => {
+      const a = { ...borradorBase, id: 'd1', monto: 100, banco_id: 'banco-1', fecha: '2026-07-20' }
+      const b = { ...borradorBase, id: 'd2', monto: 100, banco_id: 'banco-1', fecha: '2026-07-22' }
+
+      const resultado = calcularPosiblesDuplicados([a, b])
+
+      expect(resultado.has('d1')).toBe(true)
+      expect(resultado.has('d2')).toBe(true)
+    })
+
+    it('borde: mismo monto/banco pero fecha a más de 3 días → ninguno marcado', () => {
+      const a = { ...borradorBase, id: 'd1', monto: 100, banco_id: 'banco-1', fecha: '2026-07-20' }
+      const b = { ...borradorBase, id: 'd2', monto: 100, banco_id: 'banco-1', fecha: '2026-07-24' }
+
+      const resultado = calcularPosiblesDuplicados([a, b])
+
+      expect(resultado.size).toBe(0)
+    })
+
+    it('borde: distinto banco → no se marca aunque monto y fecha coincidan', () => {
+      const a = { ...borradorBase, id: 'd1', monto: 100, banco_id: 'banco-1', fecha: '2026-07-20' }
+      const b = { ...borradorBase, id: 'd2', monto: 100, banco_id: 'banco-2', fecha: '2026-07-20' }
+
+      const resultado = calcularPosiblesDuplicados([a, b])
+
+      expect(resultado.size).toBe(0)
+    })
+
+    it('borde: distinto monto → no se marca aunque banco y fecha coincidan', () => {
+      const a = { ...borradorBase, id: 'd1', monto: 100, banco_id: 'banco-1', fecha: '2026-07-20' }
+      const b = { ...borradorBase, id: 'd2', monto: 200, banco_id: 'banco-1', fecha: '2026-07-20' }
+
+      const resultado = calcularPosiblesDuplicados([a, b])
+
+      expect(resultado.size).toBe(0)
+    })
+
+    it('borde: un borrador en revisión manual (monto null) nunca se marca como duplicado', () => {
+      const a = { ...borradorRevisionManual, id: 'd1', banco_id: 'banco-1', fecha: '2026-07-20' }
+      const b = { ...borradorRevisionManual, id: 'd2', banco_id: 'banco-1', fecha: '2026-07-20' }
+
+      const resultado = calcularPosiblesDuplicados([a, b])
+
+      expect(resultado.size).toBe(0)
     })
   })
 })

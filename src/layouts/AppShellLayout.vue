@@ -9,18 +9,31 @@ import { useAuth } from '@/composables/useAuth'
 import { useVersion } from '@/composables/useVersion'
 import { useBancos } from '@/composables/useBancos'
 import { useCategorias } from '@/composables/useCategorias'
+import { usePresupuestos } from '@/composables/usePresupuestos'
+import { useBandeja } from '@/composables/useBandeja'
+import { cargarResumenPorMoneda, proyeccionCierreMes } from '@/composables/useDashboard'
+import { useMoneda } from '@/composables/useMoneda'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import { useGastosStore } from '@/stores/gastos'
+import { supabase } from '@/lib/supabaseClient'
+import type { Gasto } from '@/types/gasto'
 
 /**
- * App Shell de las secciones privadas: sidebar en escritorio (≥900px) y
- * bottom nav en móvil (<900px), ambos con acceso a Historial, Ingresos y
- * Bancos. El registro de gastos/ingresos ya no vive en el sidebar: cada
- * vista tiene su propio botón "+ Nuevo X" que abre su modal (Historial,
- * Ingresos); en móvil, el FAB "+" abre `HojaAccionesFab`, que a su vez abre
- * el modal elegido (Épica 11, UX), montado aquí en el shell. Incluye el
- * bloque de cuenta con los datos del usuario autenticado y el botón de salir.
+ * App Shell "Caudal" (Fase 1 del rediseño) de las secciones privadas: sidebar
+ * en escritorio (≥900px, orden Dashboard/Ingresos/Egresos/Bandeja/Presupuesto/
+ * Gráficos/Maestros + grupo transitorio Categorías/Bancos, ver GATE1-#1 de
+ * `dev-plan.md`) y bottom nav en móvil (<900px). El registro de gastos/
+ * ingresos sigue centralizado aquí: en móvil el FAB "+" abre la hoja de
+ * acciones; en escritorio, el botón "+ Registrar" de cada vista (dentro de
+ * `<main>`, ej. `DashboardView`) no puede montar `HojaAccionesFab`
+ * directamente (el shell es la ruta padre), así que media por
+ * `useUiStore.hojaAccionesAbierta` (GATE1-#2): cualquier vista puede abrir la
+ * misma hoja sin duplicar este marcado. Incluye además el bloque de cuenta
+ * del usuario autenticado y, al fondo del sidebar, la card "Proyección
+ * {mes}" (GATE1-#3): visible en TODA ruta (no solo el Dashboard), por eso
+ * hace su propio fetch ligero de gastos confirmados del mes + presupuestos,
+ * en vez de depender de que `DashboardView` ya los haya cargado.
  */
 const router = useRouter()
 const storeAuth = useAuthStore()
@@ -30,10 +43,20 @@ const { cerrarSesion } = useAuth()
 const { textoVersion, commitCompleto } = useVersion()
 const { cargarBancos } = useBancos()
 const { cargarCategorias } = useCategorias()
+const { cargarPresupuestos } = usePresupuestos()
+const { cargarBorradores } = useBandeja()
+const { formatearMonto } = useMoneda()
 
 const modalGastoAbierto = ref(false)
 const modalIngresoAbierto = ref(false)
-const hojaAbierta = ref(false)
+
+/**
+ * Gastos confirmados del mes en curso: fetch propio y ligero del shell (GATE1-#3),
+ * solo para la card "Proyección" del sidebar. NO reutiliza `useDashboard`
+ * (trae una ventana de 6 meses, pensada para las tendencias del Dashboard;
+ * sería un fetch mucho más pesado del que necesita esta card).
+ */
+const gastosDelMesShell = ref<Gasto[]>([])
 
 /** Cantidad de borradores pendientes de confirmar, para el badge del ítem "Bandeja". */
 const cantidadBorradores = computed(() => storeGastos.borradores.length)
@@ -46,6 +69,69 @@ const nombreUsuario = computed(() => emailUsuario.value.split('@')[0] || 'Usuari
 
 /** Inicial para el avatar circular del bloque de cuenta. */
 const inicialUsuario = computed(() => nombreUsuario.value.charAt(0).toUpperCase())
+
+/**
+ * Primer día del mes actual (`YYYY-MM-01`), acota el fetch ligero de la card
+ * "Proyección". Aritmética local a este shell: cada composable/vista que
+ * necesita esta fecha calcula la suya (ver nota equivalente en
+ * `useDashboard.ts`/`usePresupuestos.ts`); no se extrae un helper compartido
+ * en este build (ver "Sugerencias fuera de alcance" de `dev-plan.md`).
+ */
+function primerDiaMesActual(): string {
+  const ahora = new Date()
+  const anio = ahora.getFullYear()
+  const mes = String(ahora.getMonth() + 1).padStart(2, '0')
+  return `${anio}-${mes}-01`
+}
+
+/** Día del mes actual (1-31), base de la proyección de cierre de mes. */
+const diaActual = computed(() => new Date().getDate())
+
+/** Cantidad de días del mes actual (28-31), base de la proyección de cierre de mes. */
+const diasDelMes = computed(() => {
+  const ahora = new Date()
+  return new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0).getDate()
+})
+
+/** Nombre del mes actual, capitalizado, para el título "Proyección {mes}" de la card. */
+const nombreMesActual = computed(() => {
+  const nombre = new Intl.DateTimeFormat('es-PE', { month: 'long' }).format(new Date())
+  return `${nombre.charAt(0).toUpperCase()}${nombre.slice(1)}`
+})
+
+/**
+ * Gastado del mes en PEN: el sidebar no tiene selector de moneda propio (se
+ * ve en toda ruta, no solo el Dashboard), así que PEN se asume como moneda
+ * base de esta card (supuesto honesto, ver `dev-plan.md`).
+ */
+const gastadoMesPEN = computed(
+  () => cargarResumenPorMoneda(gastosDelMesShell.value, primerDiaMesActual()).PEN.total,
+)
+
+/** Límite total de presupuesto del mes en PEN (hidratado por `cargarPresupuestos` en el `onMounted` de este shell). */
+const limitePresupuestoPEN = computed(() =>
+  storeGastos.presupuestos
+    .filter((presupuesto) => presupuesto.moneda === 'PEN')
+    .reduce((total, presupuesto) => total + presupuesto.monto_limite, 0),
+)
+
+/** Proyección de cierre de mes (extrapolación lineal), misma función pura que usa `DashboardView`. */
+const proyeccionMesPEN = computed(() =>
+  proyeccionCierreMes(gastadoMesPEN.value, diaActual.value, diasDelMes.value),
+)
+
+const proyeccionMesFormateada = computed(() => formatearMonto(proyeccionMesPEN.value, 'PEN'))
+
+/**
+ * Nota bajo el monto proyectado: % sobre el presupuesto configurado (mismo
+ * criterio "sin límite → sin %" que `TarjetaPresupuestoResumen`), o un texto
+ * genérico si el usuario no tiene presupuesto configurado este mes.
+ */
+const notaProyeccionMes = computed(() => {
+  if (limitePresupuestoPEN.value <= 0) return 'Estimado de cierre de mes'
+  const porcentaje = Math.round((proyeccionMesPEN.value / limitePresupuestoPEN.value) * 100)
+  return `${porcentaje}% de tu presupuesto de este mes`
+})
 
 /** Cierra el modal de alta de gasto sin guardar. */
 function cerrarModalGasto() {
@@ -67,25 +153,25 @@ function manejarGuardadoIngreso() {
   modalIngresoAbierto.value = false
 }
 
-/** Abre la hoja de acciones del FAB móvil. */
+/** Abre la hoja de acciones (FAB móvil o "+ Registrar" de cualquier vista, vía `useUiStore`). */
 function abrirHoja() {
-  hojaAbierta.value = true
+  storeUi.abrirHojaAcciones()
 }
 
 /** Cierra la hoja de acciones sin abrir ningún modal. */
 function cerrarHoja() {
-  hojaAbierta.value = false
+  storeUi.cerrarHojaAcciones()
 }
 
 /** La hoja pidió registrar un gasto: la cierra y abre `ModalGasto`. */
 function elegirRegistrarGastoDesdeHoja() {
-  hojaAbierta.value = false
+  storeUi.cerrarHojaAcciones()
   modalGastoAbierto.value = true
 }
 
 /** La hoja pidió registrar un ingreso: la cierra y abre `ModalIngreso`. */
 function elegirRegistrarIngresoDesdeHoja() {
-  hojaAbierta.value = false
+  storeUi.cerrarHojaAcciones()
   modalIngresoAbierto.value = true
 }
 
@@ -97,29 +183,51 @@ async function manejarSalir() {
   }
 }
 
+/** Carga liviana de los gastos confirmados del mes en curso, solo para la card "Proyección" (GATE1-#3). */
+async function cargarGastosDelMesShell() {
+  const { data, error } = await supabase
+    .from('gastos')
+    .select()
+    .eq('estado', 'confirmado')
+    .gte('fecha', primerDiaMesActual())
+    .order('fecha', { ascending: false })
+  if (!error) {
+    gastosDelMesShell.value = (data ?? []) as Gasto[]
+  }
+}
+
 /**
- * Hidrata el catálogo compartido de bancos y categorías apenas se monta el
- * shell. Este es el único componente garantizado activo antes de que
- * cualquier modal (gasto/ingreso) pueda abrirse, sin importar cuál sea la
- * ruta hija actual: si esa carga viviera solo en el `onMounted` de cada
- * vista, abrir "Nuevo gasto" desde una vista que no cargó bancos/categorías
- * (p. ej. el Dashboard, sin haber visitado antes Historial/Bancos) mostraba
- * "No hay bancos/categorías; créalos primero." aunque sí existieran en BD.
- * Las llamadas equivalentes en las vistas se mantienen (son fire-and-forget
- * y baratas): sirven como refresh de sesión al navegar.
+ * Hidrata el catálogo compartido de bancos y categorías, los borradores
+ * pendientes (para el badge de "Bandeja", visible en TODA ruta) y los datos
+ * de la card "Proyección" (gastos del mes + presupuestos), apenas se monta
+ * el shell. Este es el único componente garantizado activo antes de que
+ * cualquier modal (gasto/ingreso) pueda abrirse o cualquier ruta hija se
+ * muestre: si esa carga viviera solo en el `onMounted` de cada vista, abrir
+ * "Nuevo gasto" desde una vista que no cargó bancos/categorías (p. ej. el
+ * Dashboard, sin haber visitado antes Historial/Bancos) mostraba "No hay
+ * bancos/categorías; créalos primero." aunque sí existieran en BD — el mismo
+ * problema aplicaba al badge de borradores: entrar por deep-link/refresh a
+ * una ruta que no fuera Dashboard/Bandeja lo mostraba en 0 aunque hubiera
+ * borradores reales en BD. Las llamadas equivalentes en las vistas se
+ * mantienen (son fire-and-forget y baratas): sirven como refresh de sesión
+ * al navegar. `cargarPresupuestos`/`cargarBorradores` pueden repetirse si el
+ * usuario está en el propio Dashboard/Bandeja (que también los llaman):
+ * mismo store, costo de fetch duplicado aceptado (GATE1-#3).
  */
 onMounted(() => {
   cargarBancos()
   cargarCategorias()
+  cargarGastosDelMesShell()
+  cargarPresupuestos()
+  cargarBorradores()
 })
-
 </script>
 
 <template>
   <div class="shell">
     <aside class="barra-lateral">
       <div class="logo-marca">
-        <span class="logo-cuadro">g</span>
+        <span class="logo-cuadro">G</span>
         <span class="logo-texto">Gastorin</span>
       </div>
 
@@ -133,18 +241,18 @@ onMounted(() => {
           </svg>
           Dashboard
         </router-link>
-        <!-- "Egresos" es el nuevo texto visible para la ruta `historial` (gasto histórico); el name de ruta no cambia. -->
-        <router-link :to="{ name: 'historial' }" class="item-nav">
-          <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-          </svg>
-          Egresos
-        </router-link>
         <router-link :to="{ name: 'ingresos' }" class="item-nav">
           <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 19V5M5 12l7-7 7 7" />
           </svg>
           Ingresos
+        </router-link>
+        <!-- "Egresos" es el texto visible para la ruta `historial` (gasto histórico); el name de ruta no cambia. -->
+        <router-link :to="{ name: 'historial' }" class="item-nav">
+          <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+          </svg>
+          Egresos
         </router-link>
         <router-link :to="{ name: 'bandeja' }" class="item-nav">
           <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -154,14 +262,36 @@ onMounted(() => {
           Bandeja
           <span v-if="cantidadBorradores > 0" class="insignia-nav">{{ cantidadBorradores }}</span>
         </router-link>
+        <!-- El name de ruta sigue siendo "presupuestos"; el texto visible pasa a singular ("Presupuesto", orden Caudal). -->
         <router-link :to="{ name: 'presupuestos' }" class="item-nav">
           <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <rect x="3" y="4" width="18" height="16" rx="2" />
             <path d="M3 10h18" />
             <path d="M8 15h4" />
           </svg>
-          Presupuestos
+          Presupuesto
         </router-link>
+        <!-- Fase 5 del rediseño "Caudal": ruta stub a `ProximamenteView` (ver GATE1-#1 de dev-plan.md). -->
+        <router-link :to="{ name: 'graficos' }" class="item-nav">
+          <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 3v18h18" />
+            <path d="m19 9-5 5-4-4-3 3" />
+          </svg>
+          Gráficos
+        </router-link>
+        <!-- Fase 6 del rediseño "Caudal": absorberá Categorías/Bancos (ver GATE1-#1 de dev-plan.md). -->
+        <router-link :to="{ name: 'maestros' }" class="item-nav">
+          <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="m12 2 9 5-9 5-9-5 9-5Z" />
+            <path d="m3 12 9 5 9-5" />
+            <path d="m3 17 9 5 9-5" />
+          </svg>
+          Maestros
+        </router-link>
+
+        <!-- Grupo transitorio: Categorías/Bancos se absorberán en Maestros (Fase 6). Divisor sutil, no un enlace muerto. -->
+        <div class="separador-nav" role="separator" />
+
         <router-link :to="{ name: 'categorias' }" class="item-nav">
           <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M20.59 13.41 12 22 2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82Z" />
@@ -177,6 +307,12 @@ onMounted(() => {
           Bancos
         </router-link>
       </nav>
+
+      <div class="tarjeta-proyeccion">
+        <p class="etiqueta-proyeccion">Proyección {{ nombreMesActual }}</p>
+        <p class="monto-proyeccion">{{ proyeccionMesFormateada }}</p>
+        <p class="nota-proyeccion">{{ notaProyeccionMes }}</p>
+      </div>
 
       <div class="bloque-cuenta">
         <div class="avatar">{{ inicialUsuario }}</div>
@@ -208,18 +344,18 @@ onMounted(() => {
         </svg>
         Dashboard
       </router-link>
-      <!-- "Egresos" es el nuevo texto visible para la ruta `historial`; el name de ruta no cambia. -->
-      <router-link :to="{ name: 'historial' }" class="item-nav-movil">
-        <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-        </svg>
-        Egresos
-      </router-link>
       <router-link :to="{ name: 'ingresos' }" class="item-nav-movil">
         <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 19V5M5 12l7-7 7 7" />
         </svg>
         Ingresos
+      </router-link>
+      <!-- "Egresos" es el texto visible para la ruta `historial`; el name de ruta no cambia. -->
+      <router-link :to="{ name: 'historial' }" class="item-nav-movil">
+        <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+        </svg>
+        Egresos
       </router-link>
       <router-link :to="{ name: 'bandeja' }" class="item-nav-movil">
         <span class="envoltorio-icono-movil">
@@ -237,7 +373,22 @@ onMounted(() => {
           <path d="M3 10h18" />
           <path d="M8 15h4" />
         </svg>
-        Presupuestos
+        Presupuesto
+      </router-link>
+      <router-link :to="{ name: 'graficos' }" class="item-nav-movil">
+        <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 3v18h18" />
+          <path d="m19 9-5 5-4-4-3 3" />
+        </svg>
+        Gráficos
+      </router-link>
+      <router-link :to="{ name: 'maestros' }" class="item-nav-movil">
+        <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m12 2 9 5-9 5-9-5 9-5Z" />
+          <path d="m3 12 9 5 9-5" />
+          <path d="m3 17 9 5 9-5" />
+        </svg>
+        Maestros
       </router-link>
       <router-link :to="{ name: 'categorias' }" class="item-nav-movil">
         <svg class="icono-nav" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -278,7 +429,7 @@ onMounted(() => {
       @guardado="manejarGuardadoIngreso"
     />
     <HojaAccionesFab
-      v-if="hojaAbierta"
+      v-if="storeUi.hojaAccionesAbierta"
       @cerrar="cerrarHoja"
       @registrar-gasto="elegirRegistrarGastoDesdeHoja"
       @registrar-ingreso="elegirRegistrarIngresoDesdeHoja"
@@ -300,46 +451,52 @@ onMounted(() => {
 .logo-marca {
   display: flex;
   align-items: center;
-  gap: var(--espacio-3);
-  padding: 0 var(--espacio-2);
+  gap: var(--espacio-2);
+  padding: 0 var(--espacio-1);
 }
 
 .logo-cuadro {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  background: var(--color-primario);
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: #1a1a18;
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 800;
-  font-size: 1.1rem;
+  font-size: 0.85rem;
 }
 
 .logo-texto {
   font-weight: 700;
-  font-size: 1.1rem;
+  font-size: 1rem;
   color: var(--color-texto);
 }
 
 .navegacion {
   display: flex;
   flex-direction: column;
-  gap: var(--espacio-1);
-  margin-top: var(--espacio-8);
+  gap: 2px;
+}
+
+.separador-nav {
+  height: 1px;
+  background: rgba(0, 0, 0, 0.07);
+  margin: var(--espacio-2) var(--espacio-1);
 }
 
 .item-nav {
   display: flex;
   align-items: center;
   gap: var(--espacio-3);
-  padding: var(--espacio-3);
-  border-radius: var(--radio-borde);
-  color: var(--color-texto-secundario);
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: rgba(0, 0, 0, 0.62);
   text-decoration: none;
-  font-weight: 600;
-  font-size: 0.95rem;
+  font-weight: 500;
+  font-size: 0.9rem;
   border: none;
   background: none;
   width: 100%;
@@ -349,26 +506,29 @@ onMounted(() => {
 }
 
 .item-nav:hover {
-  background: #f1f3f2;
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .item-nav.router-link-active {
-  background: rgba(0, 113, 227, 0.12);
-  color: var(--color-primario);
+  background: #fff;
+  color: var(--color-texto);
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .icono-nav {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
 }
 
 .insignia-nav {
   margin-left: auto;
-  background: var(--color-error);
+  background: oklch(0.58 0.13 25);
   color: #fff;
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-family: var(--fuente-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
@@ -390,18 +550,49 @@ onMounted(() => {
   margin-left: 0;
 }
 
-.bloque-cuenta {
+.tarjeta-proyeccion {
   margin-top: auto;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  border-radius: 12px;
+  padding: var(--espacio-3);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.etiqueta-proyeccion {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-texto-secundario);
+}
+
+.monto-proyeccion {
+  margin: 0;
+  font-family: var(--fuente-mono);
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--color-texto);
+}
+
+.nota-proyeccion {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--color-texto-terciario);
+}
+
+.bloque-cuenta {
   display: flex;
   align-items: center;
   gap: var(--espacio-3);
-  padding: var(--espacio-3);
-  border-top: 1px solid var(--color-borde-tarjeta);
+  padding: var(--espacio-3) var(--espacio-1);
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
 }
 
 .avatar {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   background: var(--color-primario);
   color: #fff;
@@ -420,7 +611,7 @@ onMounted(() => {
 .nombre-cuenta {
   margin: 0;
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--color-texto);
   text-transform: capitalize;
   overflow: hidden;
@@ -430,7 +621,7 @@ onMounted(() => {
 
 .email-cuenta {
   margin: 0;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--color-texto-terciario);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -470,7 +661,7 @@ onMounted(() => {
   padding: var(--espacio-2) var(--espacio-4);
   padding-bottom: calc(var(--espacio-2) + env(safe-area-inset-bottom));
   z-index: 50;
-  /* Con 7 rutas + Salir + FAB + versión, el bottom nav no entra en pantallas
+  /* Con 9 rutas + Salir + FAB + versión, el bottom nav no entra en pantallas
      angostas: se permite scroll horizontal contenido en vez de recortar ítems. */
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -507,7 +698,7 @@ onMounted(() => {
   justify-content: center;
   cursor: pointer;
   margin-top: -24px;
-  box-shadow: 0 4px 12px rgba(0, 113, 227, 0.35);
+  box-shadow: 0 4px 12px rgba(26, 26, 24, 0.35);
   flex-shrink: 0;
 }
 .boton-fab:hover {
@@ -531,14 +722,16 @@ onMounted(() => {
   .barra-lateral {
     display: flex;
     flex-direction: column;
-    width: 252px;
+    width: 212px;
     flex-shrink: 0;
-    padding: var(--espacio-6) var(--espacio-4);
-    background: var(--color-fondo);
-    border-right: 1px solid var(--color-borde-tarjeta);
+    padding: 20px 14px;
+    gap: 26px;
+    background: #f4f2ee;
+    border-right: 1px solid rgba(0, 0, 0, 0.07);
     position: sticky;
     top: 0;
     height: 100vh;
+    box-sizing: border-box;
   }
 
   .navegacion-inferior {

@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useCategorias } from '@/composables/useCategorias'
 import { useGastosStore } from '@/stores/gastos'
-import type { Categoria } from '@/types/gasto'
+import type { Categoria, TipoCategoria } from '@/types/gasto'
 
 /**
  * Formulario único compartido por alta y edición de categorías. Si
@@ -11,9 +11,13 @@ import type { Categoria } from '@/types/gasto'
  * (ver `useColorCategoria`), no se persiste.
  * En edición de una categoría predefinida, el nombre es de solo lectura y
  * solo se ofrece la acción de desactivar (HU-4.4).
+ * `tipo` fija el contexto de apertura (gasto/ingreso, ver GATE 1 de la Fase
+ * 2 "Caudal"): el usuario no lo elige, solo se usa al CREAR (en edición, la
+ * categoría ya tiene su tipo asignado y no cambia).
  */
 const props = defineProps<{
   categoria?: Categoria | null
+  tipo: TipoCategoria
 }>()
 
 const emit = defineEmits<{
@@ -59,7 +63,7 @@ async function manejarEnvio() {
   if (esEdicion.value && props.categoria) {
     exito = await editarCategoria(props.categoria.id, nombreLimpio)
   } else {
-    exito = await crearCategoria(nombreLimpio)
+    exito = await crearCategoria(nombreLimpio, props.tipo)
   }
 
   if (exito) {

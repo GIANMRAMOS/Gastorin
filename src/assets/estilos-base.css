@@ -1,19 +1,23 @@
 :root {
-  --color-primario: #0071e3;
-  --color-primario-hover: #0077ed;
-  --color-texto: #1d1d1f;
-  --color-texto-secundario: #6e6e73;
-  --color-texto-terciario: #86868b;
+  /* Paleta "Caudal" (Fase 0 del rediseño): fondos cálidos crema/marfil, tinta
+     casi-negra como color de acción (ya no azul), verde/coral para
+     ingresos/egresos. Se reemplazan VALORES, no nombres: todo el resto del
+     código sigue consumiendo las mismas variables. */
+  --color-primario: #1a1a18;
+  --color-primario-hover: #33322e;
+  --color-texto: #1a1a18;
+  --color-texto-secundario: #6b6862;
+  --color-texto-terciario: #948f87;
   --color-fondo: #ffffff;
-  --color-fondo-app: #f5f5f7;
-  --color-borde: #d2d2d7;
-  --color-borde-tarjeta: #e8e8ed;
+  --color-fondo-app: #faf9f7;
+  --color-borde: #e2ded7;
+  --color-borde-tarjeta: #f0eeea;
   --color-borde-foco: var(--color-primario);
-  --sombra-foco: 0 0 0 3px rgba(0, 113, 227, 0.14);
-  --color-error: #ff3b30;
-  --color-error-fondo: #fef2f2;
-  --color-exito: #34c759;
-  --color-exito-fondo: #f0fdf4;
+  --sombra-foco: 0 0 0 3px rgba(26, 26, 24, 0.14);
+  --color-error: #d9573f;
+  --color-error-fondo: #fbeeeb;
+  --color-exito: #3a9d6b;
+  --color-exito-fondo: #eaf6f0;
   --color-deshabilitado: #9ca3af;
   /* Estado "cerca del límite" (>=85%) de un presupuesto: ni normal ni sobregiro. */
   --color-advertencia: #ff9500;
@@ -35,7 +39,12 @@
   --color-categoria-personalizada-4: #4f46e5;
   --color-categoria-personalizada-5: #ea580c;
 
-  --fuente-base: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
+  --fuente-base: 'DM Sans', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial,
+    sans-serif;
+  /* Fuente monoespaciada para montos destacados (hero de balance, feed de
+     movimientos): alinea los dígitos y les da identidad propia frente al
+     texto general. */
+  --fuente-mono: 'IBM Plex Mono', monospace;
   --tamano-base: 16px;
   --tamano-titulo: 1.75rem;
   --tamano-pequeno: 0.875rem;

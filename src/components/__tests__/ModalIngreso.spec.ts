@@ -9,6 +9,7 @@ const ingresoBase: Ingreso = {
   id: 'i1',
   usuario_id: 'u1',
   banco_id: 'b1',
+  categoria_id: 'ci1',
   fecha: '2026-07-10',
   moneda: 'PEN',
   importe: 100,

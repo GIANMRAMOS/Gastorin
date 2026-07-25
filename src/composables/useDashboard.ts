@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { useGastosStore } from '@/stores/gastos'
 import { supabase } from '@/lib/supabaseClient'
 import type { Gasto, Moneda } from '@/types/gasto'
-import type { Ingreso } from '@/types/ingreso'
+import type { Banco, Ingreso } from '@/types/ingreso'
 
 /** Cantidad de meses (incluido el actual) que cubre la ventana de la tendencia mensual. */
 const MESES_VENTANA_TENDENCIA = 6
@@ -185,11 +185,92 @@ export function cargarBalancePorMoneda(
   return balancePorMoneda
 }
 
+/** Prefijos de nombre (case-insensitive) de las únicas dos cuentas que la tarjeta "Saldo por cuenta" muestra hoy. */
+const PREFIJOS_CUENTA_DASHBOARD = ['bcp', 'ibk']
+
+/** Saldo neto de una cuenta (banco) para la tarjeta "Saldo por cuenta" del Dashboard. */
+export interface SaldoCuenta {
+  bancoId: string
+  nombreBanco: string
+  /** Saldo en PEN (moneda base de la tarjeta): ingresos − gastos de ese banco. */
+  saldoPen: number
+  /** Saldo en USD, o `null` si el banco no tiene ningún movimiento en esa moneda (no se muestra badge). */
+  saldoUsd: number | null
+}
+
+/**
+ * Calcula, de forma pura, el saldo neto (ingresos − gastos) por cuenta para
+ * la tarjeta "Saldo por cuenta" del Dashboard. Ajuste de alcance: solo
+ * incluye bancos cuyo nombre empiece con "BCP"/"IBK" (case-insensitive);
+ * cualquier otro banco (u "Otros ingresos"-style de respaldo) se ignora aquí,
+ * a propósito. Nota clave: "IBK" e "IBK US$" son DOS bancos reales y
+ * separados en `bancos` (la ingesta los creó así para distinguir moneda),
+ * NO una sola cuenta con dos monedas — cada uno produce su propia entrada
+ * en el resultado, con su propio `bancoId`. `TarjetaSaldosPorCuenta` decide
+ * cómo etiquetarlos ("IBK S/."/"IBK $") y en qué moneda mostrar el monto
+ * principal de cada uno, pero nunca inventa ni divide una cuenta aquí.
+ *
+ * Usa `gastos`/`ingresos` tal como los recibe (la ventana de 6 meses ya
+ * cargada por `cargarDatosDashboard`, ver `useDashboard()` abajo): para un
+ * proyecto que recién empezó a registrarse en Gastorin esto cubre toda su
+ * historia real; si en el futuro se necesita un saldo verdaderamente
+ * histórico (>6 meses), este composable necesitaría su propio fetch sin
+ * ventana, igual que `AppShellLayout` hace para la card "Proyección".
+ *
+ * Cada cuenta SIEMPRE aparece (aunque su saldo sea 0): a diferencia de
+ * `saldosPorBanco` (que omite combinaciones en 0 para un desglose informal),
+ * aquí las cuentas vienen de un catálogo conocido (bancos ya creados en
+ * `bancos`), no de un descubrimiento dinámico — omitir una dejaría un hueco
+ * visual confuso ("¿y mi otra cuenta?"). El USD sí se omite (`null`) si el
+ * banco nunca tuvo movimiento en esa moneda, para no mostrar un badge
+ * "$ 0.00" vacío de significado.
+ */
+export function calcularSaldoNetoPorCuenta(
+  bancos: Banco[],
+  gastos: Gasto[],
+  ingresos: Ingreso[],
+): SaldoCuenta[] {
+  const cuentas = bancos
+    .filter((banco) =>
+      PREFIJOS_CUENTA_DASHBOARD.some((prefijo) => banco.nombre.toLowerCase().startsWith(prefijo)),
+    )
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }))
+
+  return cuentas.map((banco) => {
+    const gastosBanco = gastos.filter((gasto) => gasto.banco_id === banco.id)
+    const ingresosBanco = ingresos.filter((ingreso) => ingreso.banco_id === banco.id)
+    const tieneMovimientoUsd =
+      gastosBanco.some((gasto) => gasto.moneda === 'USD') ||
+      ingresosBanco.some((ingreso) => ingreso.moneda === 'USD')
+
+    function saldoEnMoneda(moneda: Moneda): number {
+      const totalIngresos = ingresosBanco
+        .filter((ingreso) => ingreso.moneda === moneda)
+        .reduce((total, ingreso) => total + ingreso.importe, 0)
+      const totalGastos = gastosBanco
+        .filter((gasto) => gasto.moneda === moneda)
+        .reduce((total, gasto) => total + (gasto.monto ?? 0), 0)
+      return totalIngresos - totalGastos
+    }
+
+    return {
+      bancoId: banco.id,
+      nombreBanco: banco.nombre,
+      saldoPen: saldoEnMoneda('PEN'),
+      saldoUsd: tieneMovimientoUsd ? saldoEnMoneda('USD') : null,
+    }
+  })
+}
+
 /**
  * Movimiento (gasto o ingreso) unificado para el widget "Últimos
- * movimientos" del Dashboard. Es el tipo de retorno de
- * `combinarUltimosMovimientos`: no amerita tocar `types/`, ya que solo se usa
- * para esta agregación.
+ * movimientos"/feed del Dashboard. Es el tipo de retorno de
+ * `combinarUltimosMovimientos` y `combinarMovimientosDelMes`: no amerita tocar
+ * `types/`, ya que solo se usa para esta agregación. `categoriaId`/`bancoId`
+ * (extensión aditiva, Fase 0 "Caudal") permiten que el feed resuelva
+ * "categoría · banco" contra los stores; un ingreso NUNCA tiene categoría
+ * (la tabla `ingresos` no tiene `categoria_id`), por eso `categoriaId` es
+ * `string | null` y no `string`.
  */
 export interface MovimientoUnificado {
   tipo: 'gasto' | 'ingreso'
@@ -198,6 +279,42 @@ export interface MovimientoUnificado {
   descripcion: string
   moneda: Moneda
   id: string
+  categoriaId: string | null
+  bancoId: string
+}
+
+/** Mapea un `Gasto` a `MovimientoUnificado` (reutilizado por ambas funciones de combinación). */
+function movimientoDesdeGasto(gasto: Gasto): MovimientoUnificado {
+  return {
+    tipo: 'gasto',
+    fecha: gasto.fecha,
+    monto: gasto.monto ?? 0,
+    descripcion: gasto.descripcion ?? '',
+    moneda: gasto.moneda ?? 'PEN',
+    id: gasto.id,
+    categoriaId: gasto.categoria_id,
+    bancoId: gasto.banco_id,
+  }
+}
+
+/** Mapea un `Ingreso` a `MovimientoUnificado` (reutilizado por ambas funciones de combinación). */
+function movimientoDesdeIngreso(ingreso: Ingreso): MovimientoUnificado {
+  return {
+    tipo: 'ingreso',
+    fecha: ingreso.fecha,
+    monto: ingreso.importe,
+    descripcion: ingreso.concepto,
+    moneda: ingreso.moneda,
+    id: ingreso.id,
+    categoriaId: null,
+    bancoId: ingreso.banco_id,
+  }
+}
+
+/** Desempate determinista por `id` cuando dos movimientos comparten fecha exacta. */
+function compararMovimientosDesc(a: MovimientoUnificado, b: MovimientoUnificado): number {
+  if (a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha)
+  return b.id.localeCompare(a.id)
 }
 
 /**
@@ -214,30 +331,63 @@ export function combinarUltimosMovimientos(
   ingresos: Ingreso[],
   limite = 5,
 ): MovimientoUnificado[] {
-  const movimientosGastos: MovimientoUnificado[] = gastos.map((gasto) => ({
-    tipo: 'gasto',
-    fecha: gasto.fecha,
-    monto: gasto.monto ?? 0,
-    descripcion: gasto.descripcion ?? '',
-    moneda: gasto.moneda ?? 'PEN',
-    id: gasto.id,
-  }))
-
-  const movimientosIngresos: MovimientoUnificado[] = ingresos.map((ingreso) => ({
-    tipo: 'ingreso',
-    fecha: ingreso.fecha,
-    monto: ingreso.importe,
-    descripcion: ingreso.concepto,
-    moneda: ingreso.moneda,
-    id: ingreso.id,
-  }))
+  const movimientosGastos = gastos.map(movimientoDesdeGasto)
+  const movimientosIngresos = ingresos.map(movimientoDesdeIngreso)
 
   return [...movimientosGastos, ...movimientosIngresos]
-    .sort((a, b) => {
-      if (a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha)
-      return b.id.localeCompare(a.id)
-    })
+    .sort(compararMovimientosDesc)
     .slice(0, limite)
+}
+
+/**
+ * Filtro de tipo de movimiento del feed de "Inicio" (chips Todos/Ingresos/
+ * Egresos, ver `ChipsFiltroTipo.vue`). Alias exportado para no repetir el
+ * literal union en cada consumidor (`FeedMovimientos.vue`, `DashboardView.vue`).
+ */
+export type TipoFiltroMovimiento = 'todos' | 'ingresos' | 'egresos'
+
+/**
+ * Variante de `combinarUltimosMovimientos` para el feed unificado de la
+ * pantalla "Inicio" (Fase 0 "Caudal"): filtra por `mes` (prefijo `YYYY-MM`),
+ * por `moneda` y por `tipo` (`'todos'|'ingresos'|'egresos'`), ordena desc por
+ * fecha y NO recorta a un tope (el feed muestra todos los movimientos del mes
+ * que calcen con el filtro de chips activo).
+ */
+export function combinarMovimientosDelMes(
+  gastos: Gasto[],
+  ingresos: Ingreso[],
+  mes: string,
+  moneda: Moneda,
+  tipo: TipoFiltroMovimiento,
+): MovimientoUnificado[] {
+  const mesPrefijo = mes.slice(0, 7)
+
+  const movimientosGastos =
+    tipo === 'ingresos'
+      ? []
+      : gastos
+          .filter((gasto) => (gasto.moneda ?? 'PEN') === moneda && gasto.fecha.slice(0, 7) === mesPrefijo)
+          .map(movimientoDesdeGasto)
+
+  const movimientosIngresos =
+    tipo === 'egresos'
+      ? []
+      : ingresos
+          .filter((ingreso) => ingreso.moneda === moneda && ingreso.fecha.slice(0, 7) === mesPrefijo)
+          .map(movimientoDesdeIngreso)
+
+  return [...movimientosGastos, ...movimientosIngresos].sort(compararMovimientosDesc)
+}
+
+/**
+ * Proyecta el gasto de cierre de mes a partir de lo gastado hasta hoy,
+ * extrapolando linealmente (`gastadoDelMes / diaActual * diasDelMes`). Guarda
+ * contra división por cero: si `diaActual <= 0` (dato inválido) devuelve 0 en
+ * vez de `Infinity`/`NaN`.
+ */
+export function proyeccionCierreMes(gastadoDelMes: number, diaActual: number, diasDelMes: number): number {
+  if (diaActual <= 0) return 0
+  return (gastadoDelMes / diaActual) * diasDelMes
 }
 
 /**

@@ -21,9 +21,16 @@ const { formatearMonto } = useMoneda()
 /** Total máximo del set, usado como base del 100% de ancho de las barras. */
 const totalMaximo = computed(() => props.items.reduce((max, item) => Math.max(max, item.total), 0))
 
-/** Ancho porcentual de la barra de una categoría, proporcional al máximo. */
+/**
+ * Ancho porcentual de la barra de una categoría, proporcional al máximo.
+ * Un total negativo (posible en Ingresos desde la Épica 11) se clampea a 0:
+ * un `width` negativo no es válido en CSS y el navegador lo descarta en
+ * silencio, dejando la barra sin `width` inline y ocupando el 100% del
+ * contenedor por flujo por defecto — se vería como la categoría de MAYOR
+ * monto en vez de una negativa.
+ */
 function anchoBarra(total: number): string {
-  if (totalMaximo.value <= 0) return '0%'
+  if (totalMaximo.value <= 0 || total <= 0) return '0%'
   return `${(total / totalMaximo.value) * 100}%`
 }
 </script>

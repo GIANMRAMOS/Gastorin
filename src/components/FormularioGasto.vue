@@ -2,7 +2,6 @@
 import { computed, ref } from 'vue'
 import ToggleMoneda from '@/components/ToggleMoneda.vue'
 import { useGastos } from '@/composables/useGastos'
-import { useColorCategoria } from '@/composables/useColorCategoria'
 import { useGastosStore } from '@/stores/gastos'
 import { useIngresosStore } from '@/stores/ingresos'
 import { useMoneda } from '@/composables/useMoneda'
@@ -50,7 +49,6 @@ const errorValidacion = ref<string | null>(null)
 const storeGastos = useGastosStore()
 const storeIngresos = useIngresosStore()
 const { crearGasto, editarGasto } = useGastos()
-const { colorCategoria } = useColorCategoria()
 const { formatearMonto } = useMoneda()
 
 /** Símbolo de moneda para el adorno visual del monto grande (el v-model sigue siendo numérico). */
@@ -60,15 +58,21 @@ const simboloMonto = computed(() => (moneda.value ? SIMBOLO_MONEDA[moneda.value 
 /**
  * Categorías seleccionables para dar de alta un gasto: solo activas (una
  * categoría desactivada solo debe seguir viéndose en gastos históricos, no
- * ofrecerse aquí).
+ * ofrecerse aquí) y de tipo 'gasto' (blindaje defensivo: `storeGastos.categorias`
+ * es una bolsa mixta de ambos tipos desde la migración 008, y una categoría
+ * de ingreso nunca debe ofrecerse al dar de alta un gasto).
  */
-const categoriasActivas = computed(() => storeGastos.categorias.filter((c) => c.activa))
+const categoriasActivas = computed(() =>
+  storeGastos.categorias.filter((c) => c.activa && c.tipo === 'gasto'),
+)
 
-/** Selecciona una categoría desde los chips (escribe en el select oculto). */
-function elegirCategoria(id: string) {
-  if (sinCategorias.value) return
-  categoriaId.value = id
-}
+/**
+ * Mismas categorías, en orden alfabético (selector nativo en vez de chips:
+ * ahorra espacio en el modal y una lista larga se navega mejor ordenada).
+ */
+const categoriasOrdenadas = computed(() =>
+  [...categoriasActivas.value].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' })),
+)
 
 /** No hay categorías activas cargadas: la gestión de categorías es otra épica, hay que bloquear el guardado. */
 const sinCategorias = computed(() => categoriasActivas.value.length === 0)
@@ -212,30 +216,11 @@ async function manejarEnvio() {
     </div>
 
     <div class="grupo-campo">
-      <label>Categoría</label>
-      <!-- Chips de categoría: capa visual sobre el <select> oculto (fuente de verdad). -->
-      <div v-if="!sinCategorias" class="chips-categoria">
-        <button
-          v-for="categoria in categoriasActivas"
-          :key="categoria.id"
-          type="button"
-          class="chip-categoria"
-          :class="{ activo: categoriaId === categoria.id }"
-          @click="elegirCategoria(categoria.id)"
-        >
-          <span class="punto-categoria" :style="{ background: colorCategoria(categoria.nombre) }" />
-          {{ categoria.nombre }}
-        </button>
-      </div>
-      <select
-        id="categoria"
-        v-model="categoriaId"
-        class="sr-only"
-        :disabled="sinCategorias"
-      >
+      <label for="categoria">Categoría</label>
+      <select id="categoria" v-model="categoriaId" class="entrada" :disabled="sinCategorias">
         <option value="" disabled>Selecciona una categoría</option>
         <option
-          v-for="categoria in categoriasActivas"
+          v-for="categoria in categoriasOrdenadas"
           :key="categoria.id"
           :value="categoria.id"
         >
@@ -336,36 +321,4 @@ async function manejarEnvio() {
   color: var(--color-texto-terciario);
 }
 
-.chips-categoria {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--espacio-2);
-}
-
-.chip-categoria {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--espacio-2);
-  padding: var(--espacio-2) var(--espacio-3);
-  border-radius: 999px;
-  border: 1px solid var(--color-borde);
-  background: var(--color-fondo);
-  font-size: var(--tamano-pequeno);
-  font-weight: 600;
-  color: var(--color-texto-secundario);
-  cursor: pointer;
-  font-family: var(--fuente-base);
-}
-.chip-categoria.activo {
-  border-color: var(--color-primario);
-  background: #e2f4f1;
-  color: #0b7a6e;
-}
-
-.punto-categoria {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
 </style>

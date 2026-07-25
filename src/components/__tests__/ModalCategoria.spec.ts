@@ -18,7 +18,7 @@ describe('ModalCategoria (cierre solo por botón explícito)', () => {
 
   it('camino feliz: el botón X emite "cerrar"', async () => {
     const wrapper = mount(ModalCategoria, {
-      props: { categoria: null },
+      props: { categoria: null, tipo: 'gasto' },
       global: { stubs: { FormularioCategoria: true } },
     })
     wrapperActivo = wrapper
@@ -30,7 +30,7 @@ describe('ModalCategoria (cierre solo por botón explícito)', () => {
 
   it('borde: clic en el backdrop NO cierra', async () => {
     const wrapper = mount(ModalCategoria, {
-      props: { categoria: null },
+      props: { categoria: null, tipo: 'gasto' },
       global: { stubs: { FormularioCategoria: true } },
     })
     wrapperActivo = wrapper
@@ -42,7 +42,7 @@ describe('ModalCategoria (cierre solo por botón explícito)', () => {
 
   it('borde: Escape NO cierra', async () => {
     const wrapper = mount(ModalCategoria, {
-      props: { categoria: null },
+      props: { categoria: null, tipo: 'gasto' },
       global: { stubs: { FormularioCategoria: true } },
     })
     wrapperActivo = wrapper
@@ -58,7 +58,7 @@ describe('ModalCategoria (cierre solo por botón explícito)', () => {
     expect(storeUi.modalAbierto).toBe(false)
 
     const wrapper = mount(ModalCategoria, {
-      props: { categoria: null },
+      props: { categoria: null, tipo: 'gasto' },
       global: { stubs: { FormularioCategoria: true } },
     })
     wrapperActivo = wrapper

@@ -10,8 +10,8 @@ import type { Banco } from '@/types/ingreso'
  * emisión, igual que `ToggleMoneda`.
  */
 const categoriasFalsas: Categoria[] = [
-  { id: 'c1', usuario_id: 'u1', nombre: 'Comida', predefinida: true, activa: true, creado_en: '', abreviatura: 'C' },
-  { id: 'c2', usuario_id: 'u1', nombre: 'Ocio', predefinida: true, activa: true, creado_en: '', abreviatura: 'O' },
+  { id: 'c1', usuario_id: 'u1', nombre: 'Comida', tipo: 'gasto', predefinida: true, activa: true, creado_en: '', abreviatura: 'C' },
+  { id: 'c2', usuario_id: 'u1', nombre: 'Ocio', tipo: 'gasto', predefinida: true, activa: true, creado_en: '', abreviatura: 'O' },
 ]
 
 const bancosFalsos: Banco[] = [
@@ -26,6 +26,7 @@ function montar(props: Partial<Record<string, unknown>> = {}) {
       categoriaId: '',
       bancoId: '',
       mes: '',
+      busqueda: '',
       categorias: categoriasFalsas,
       bancos: bancosFalsos,
       mesesDisponibles: ['2026-07', '2026-06'],
@@ -98,5 +99,22 @@ describe('FiltrosHistorial', () => {
     await select.setValue('b2')
 
     expect(wrapper.emitted('update:bancoId')).toEqual([['b2']])
+  })
+
+  it('buscador de texto libre: escribir en el campo emite update:busqueda', async () => {
+    const wrapper = montar()
+
+    const buscador = wrapper.find('input[aria-label="Buscar por descripción"]')
+    await buscador.setValue('cine')
+
+    expect(wrapper.emitted('update:busqueda')).toEqual([['cine']])
+  })
+
+  it('el selector de mes rotula cada opción como "Julio 2026", no el prefijo crudo "2026-07"', () => {
+    const wrapper = montar()
+
+    const select = wrapper.find('select[aria-label="Filtrar por mes"]')
+    const opciones = select.findAll('option')
+    expect(opciones.map((o) => o.text())).toEqual(['Todos los meses', 'Julio 2026', 'Junio 2026'])
   })
 })

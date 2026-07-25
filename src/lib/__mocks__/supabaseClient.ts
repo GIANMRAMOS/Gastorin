@@ -2,11 +2,11 @@ import { vi } from 'vitest'
 
 /**
  * Crea un constructor de consultas (`.from(tabla)`) encadenable y mockeable.
- * Cada método (`select`, `insert`, `update`, `delete`, `eq`, `gte`, `lte`,
- * `lt`, `order`, `single`) devuelve el mismo builder por defecto para
- * permitir encadenar llamadas al estilo de `supabase-js` (ej.
- * `select().eq(...).gte(...).order(...)`). Como cada método es un `vi.fn()`,
- * un test puede sobreescribir cualquiera de ellos con
+ * Cada método (`select`, `insert`, `update`, `upsert`, `delete`, `eq`, `in`,
+ * `ilike`, `gte`, `lte`, `lt`, `order`, `single`, `maybeSingle`) devuelve el
+ * mismo builder por defecto para permitir encadenar llamadas al estilo de
+ * `supabase-js` (ej. `select().eq(...).gte(...).order(...)`). Como cada
+ * método es un `vi.fn()`, un test puede sobreescribir cualquiera de ellos con
  * `mockResolvedValueOnce({ data, error })` para que ese punto de la cadena
  * sea el que finalmente se "resuelve" (termina la promesa).
  */
@@ -16,14 +16,17 @@ export function crearConstructorConsulta() {
     'select',
     'insert',
     'update',
+    'upsert',
     'delete',
     'eq',
     'in',
+    'ilike',
     'gte',
     'lte',
     'lt',
     'order',
     'single',
+    'maybeSingle',
   ]
   for (const metodo of metodos) {
     builder[metodo] = vi.fn(() => builder)

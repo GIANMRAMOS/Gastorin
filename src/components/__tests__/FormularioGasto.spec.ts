@@ -16,6 +16,7 @@ const categoriaFalsa: Categoria = {
   id: 'c1',
   usuario_id: 'u1',
   nombre: 'Comida',
+  tipo: 'gasto',
   predefinida: true,
   activa: true,
   creado_en: '',
@@ -372,7 +373,7 @@ describe('FormularioGasto', () => {
       expect(fromMock).not.toHaveBeenCalled()
     })
 
-    it('borde: una categoría desactivada no aparece en los chips ni en el <select> de alta', async () => {
+    it('borde: una categoría desactivada no aparece en el <select> de alta', async () => {
       const store = useGastosStore()
       const categoriaInactiva: Categoria = { ...categoriaFalsa, id: 'c2', nombre: 'Ocio', activa: false }
       store.establecerCategorias([categoriaFalsa, categoriaInactiva])
@@ -380,10 +381,40 @@ describe('FormularioGasto', () => {
 
       const wrapper = montarFormulario(null)
 
-      expect(wrapper.findAll('.chip-categoria')).toHaveLength(1)
-      expect(wrapper.find('.chip-categoria').text()).toContain('Comida')
       const opciones = wrapper.findAll('#categoria option')
+      expect(opciones.map((o) => o.text())).toContain('Comida')
       expect(opciones.map((o) => o.text())).not.toContain('Ocio')
+    })
+
+    it('blindaje Fase 2 "Caudal" (GATE 1): una categoría de tipo "ingreso" NUNCA se ofrece al dar de alta un gasto, aunque esté activa', async () => {
+      const store = useGastosStore()
+      const categoriaIngreso: Categoria = {
+        ...categoriaFalsa,
+        id: 'ci1',
+        nombre: 'Sueldo',
+        tipo: 'ingreso',
+      }
+      store.establecerCategorias([categoriaFalsa, categoriaIngreso])
+      useIngresosStore().establecerBancos([bancoFalso])
+
+      const wrapper = montarFormulario(null)
+
+      const opciones = wrapper.findAll('#categoria option')
+      expect(opciones.map((o) => o.text())).toContain('Comida')
+      expect(opciones.map((o) => o.text())).not.toContain('Sueldo')
+    })
+
+    it('las categorías del <select> se ofrecen en orden alfabético (no en el orden en que llegaron del store)', async () => {
+      const store = useGastosStore()
+      const zapatos: Categoria = { ...categoriaFalsa, id: 'c9', nombre: 'Zapatos' }
+      const auto: Categoria = { ...categoriaFalsa, id: 'c8', nombre: 'Auto' }
+      store.establecerCategorias([zapatos, categoriaFalsa, auto])
+      useIngresosStore().establecerBancos([bancoFalso])
+
+      const wrapper = montarFormulario(null)
+
+      const opciones = wrapper.findAll('#categoria option:not([disabled])')
+      expect(opciones.map((o) => o.text())).toEqual(['Auto', 'Comida', 'Zapatos'])
     })
   })
 

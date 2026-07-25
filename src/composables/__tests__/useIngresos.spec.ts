@@ -11,6 +11,7 @@ const fromMock = supabase.from as unknown as Mock
 
 const inputBase: IngresoInput = {
   banco_id: 'b1',
+  categoria_id: 'ci1',
   fecha: '2026-07-10',
   moneda: 'PEN',
   importe: 100,
@@ -21,6 +22,7 @@ const ingresoBase: Ingreso = {
   id: 'i1',
   usuario_id: 'u1',
   banco_id: 'b1',
+  categoria_id: 'ci1',
   fecha: '2026-07-10',
   moneda: 'PEN',
   importe: 100,
@@ -214,6 +216,7 @@ describe('useIngresos (HU-11.2 / HU-11.3)', () => {
       const { editarIngreso } = useIngresos()
       const input: IngresoInput = {
         banco_id: 'b1',
+        categoria_id: 'ci1',
         fecha: '2026-07-15',
         moneda: 'PEN',
         importe: 250,

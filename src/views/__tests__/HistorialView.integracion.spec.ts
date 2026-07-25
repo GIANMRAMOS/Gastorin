@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, type Mock } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import HistorialView from '@/views/HistorialView.vue'
@@ -11,91 +11,97 @@ import type { Banco } from '@/types/ingreso'
 const fromMock = supabase.from as unknown as Mock
 
 /**
- * Pruebas de integración de `HistorialView` para la Épica 3 (HU-3.1, HU-3.2,
- * HU-3.4): fila con abreviatura/color leídos del store, filtros combinables
- * y los dos estados vacíos distintos. No repite lo que ya cubren
- * `calcularAbreviaturas.spec.ts` (helper puro) ni `FiltrosHistorial.spec.ts`
- * (emisión aislada del presentacional); aquí se verifica que la vista
- * realmente los conecta con `store.gastos`/`store.categorias`.
+ * Pruebas de integración de `HistorialView` (rediseño "Caudal", Fase 2:
+ * `TablaMovimientos` + 3 `TarjetaKpi` + sidebar "Por categoría", en vez de la
+ * lista-de-tarjetas agrupada por día de la Fase 1). No repite lo que ya
+ * cubren `TablaMovimientos.spec.ts` (presentacional aislado),
+ * `FiltrosHistorial.spec.ts` (emisión aislada) ni `useMoneda.spec.ts`
+ * (`totalesPorCategoria` puro); aquí se verifica que la vista conecta todo
+ * correctamente con `store.gastos`/`store.categorias`.
  *
- * Nota: las categorías que llegan de Supabase NO traen `abreviatura` (es un
- * campo derivado, ver `src/types/gasto.ts`); se castea el fixture crudo para
- * simular exactamente lo que devuelve la tabla real y así probar que
- * `cargarCategorias` (vía `calcularAbreviaturas`) es quien la calcula, no la
- * vista.
+ * La fecha del sistema se fija en 15 jul 2026: el selector de mes arranca en
+ * "Julio 2026" (mes actual), determinismo necesario para las 3 stat cards y
+ * el subtítulo del encabezado.
  */
+const categoriaOcio: Categoria = {
+  id: 'ocio',
+  usuario_id: 'u1',
+  nombre: 'Ocio',
+  tipo: 'gasto',
+  predefinida: true,
+  activa: true,
+  creado_en: '',
+  abreviatura: 'O',
+}
+const categoriaOtro: Categoria = {
+  id: 'otro',
+  usuario_id: 'u1',
+  nombre: 'Otro',
+  tipo: 'gasto',
+  predefinida: true,
+  activa: true,
+  creado_en: '',
+  abreviatura: 'O',
+}
+const categoriaTransporte: Categoria = {
+  id: 'transporte',
+  usuario_id: 'u1',
+  nombre: 'Transporte',
+  tipo: 'gasto',
+  predefinida: true,
+  activa: true,
+  creado_en: '',
+  abreviatura: 'T',
+}
+const categoriaIngresoOtros: Categoria = {
+  id: 'ci1',
+  usuario_id: 'u1',
+  nombre: 'Otros ingresos',
+  tipo: 'ingreso',
+  predefinida: true,
+  activa: true,
+  creado_en: '',
+  abreviatura: 'O',
+}
+const categoriasFalsas: Categoria[] = [categoriaOcio, categoriaOtro, categoriaTransporte, categoriaIngresoOtros]
 
-// Categorías "Ocio" y "Otro" comparten la primera letra ('O') a propósito,
-// para verificar la colisión de abreviatura (HU-3.1) en el contexto real de
-// la vista, y no solo en el helper aislado.
-const categoriasCrudasFalsas = [
-  { id: 'ocio', usuario_id: 'u1', nombre: 'Ocio', predefinida: true, activa: true, creado_en: '' },
-  { id: 'otro', usuario_id: 'u1', nombre: 'Otro', predefinida: true, activa: true, creado_en: '' },
-  {
-    id: 'transporte',
-    usuario_id: 'u1',
-    nombre: 'Transporte',
-    predefinida: true,
-    activa: true,
-    creado_en: '',
-  },
-] as unknown as Categoria[]
-
-// Banco único para todos los gastos falsos: no es objeto de estas pruebas de
-// filtros/estado vacío (eso lo cubre `FiltrosHistorial.spec.ts` y el filtro
-// de banco se ejercita aparte).
 const bancoFalso: Banco = { id: 'b1', usuario_id: 'u1', nombre: 'BCP', created_at: '' }
 
-const gastosFalsos: Gasto[] = [
-  {
-    id: 'g1',
-    usuario_id: 'u1',
-    categoria_id: 'ocio',
-    banco_id: 'b1',
-    monto: 25.5,
-    moneda: 'PEN',
-    fecha: '2026-07-10',
-    descripcion: 'Cine',
-    origen: 'manual',
-    estado: 'confirmado',
-    gmail_message_id: null,
-    gmail_fragmento: null,
-    creado_en: '',
-    actualizado_en: '',
-  },
-  {
-    id: 'g2',
-    usuario_id: 'u1',
-    categoria_id: 'otro',
-    banco_id: 'b1',
-    monto: 12,
-    moneda: 'USD',
-    fecha: '2026-07-15',
-    descripcion: 'Varios',
-    origen: 'manual',
-    estado: 'confirmado',
-    gmail_message_id: null,
-    gmail_fragmento: null,
-    creado_en: '',
-    actualizado_en: '',
-  },
-  {
-    id: 'g3',
-    usuario_id: 'u1',
-    categoria_id: 'transporte',
-    banco_id: 'b1',
-    monto: 8,
-    moneda: 'PEN',
-    fecha: '2026-06-01',
-    descripcion: 'Taxi',
-    origen: 'manual',
-    estado: 'confirmado',
-    gmail_message_id: null,
-    gmail_fragmento: null,
-    creado_en: '',
-    actualizado_en: '',
-  },
-]
+const gastoCine: Gasto = {
+  id: 'g1',
+  usuario_id: 'u1',
+  categoria_id: 'ocio',
+  banco_id: 'b1',
+  monto: 25.5,
+  moneda: 'PEN',
+  fecha: '2026-07-10',
+  descripcion: 'Cine',
+  origen: 'manual',
+  estado: 'confirmado',
+  gmail_message_id: null,
+  gmail_fragmento: null,
+  creado_en: '',
+  actualizado_en: '',
+}
+const gastoVarios: Gasto = {
+  ...gastoCine,
+  id: 'g2',
+  categoria_id: 'otro',
+  monto: 12,
+  moneda: 'USD',
+  fecha: '2026-07-15',
+  descripcion: 'Varios',
+}
+const gastoTaxi: Gasto = {
+  ...gastoCine,
+  id: 'g3',
+  categoria_id: 'transporte',
+  monto: 8,
+  moneda: 'PEN',
+  fecha: '2026-06-01',
+  descripcion: 'Taxi',
+}
+const gastosFalsos: Gasto[] = [gastoCine, gastoVarios, gastoTaxi]
 
 function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0))
@@ -103,9 +109,9 @@ function flushPromises() {
 
 /** Configura `supabase.from()` para devolver los fixtures dados en `onMounted`. */
 function mockearCargaInicial(
-  opciones: { categorias?: unknown[]; bancos?: Banco[]; gastos?: Gasto[] } = {},
+  opciones: { categorias?: Categoria[]; bancos?: Banco[]; gastos?: Gasto[] } = {},
 ) {
-  const { categorias = categoriasCrudasFalsas, bancos = [bancoFalso], gastos = gastosFalsos } = opciones
+  const { categorias = categoriasFalsas, bancos = [bancoFalso], gastos = gastosFalsos } = opciones
   fromMock.mockImplementation((tabla: string) => {
     const builder = crearConstructorConsulta()
     if (tabla === 'gastos') {
@@ -119,98 +125,117 @@ function mockearCargaInicial(
   })
 }
 
-describe('HistorialView — fila del historial (HU-3.1)', () => {
+describe('HistorialView — tabla, filtros y stat cards (rediseño "Caudal", Fase 2)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 6, 15)) // 15 jul 2026: "mes actual" = Julio 2026
     mockearCargaInicial()
   })
 
-  it('camino feliz: cada gasto se muestra en una fila con círculo (abreviatura+color), descripción en negrita, categoría·fecha y monto con símbolo', async () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('camino feliz: el selector de mes arranca en el mes actual y la tabla solo lista los movimientos de ese mes', async () => {
     const wrapper = mount(HistorialView)
     await flushPromises()
 
-    const filas = wrapper.findAll('.fila-gasto')
-    expect(filas).toHaveLength(3)
+    const select = wrapper.find('select[aria-label="Filtrar por mes"]')
+    expect((select.element as HTMLSelectElement).value).toBe('2026-07')
 
-    // Fila de "Cine" (categoría Ocio, colisiona con "Otro" en la letra 'O').
-    const filaCine = filas.find((f) => f.text().includes('Cine'))!
-    const circulo = filaCine.find('.circulo-categoria')
-    expect(circulo.text()).toBe('OC') // 2 caracteres por colisión con "Otro"
-    expect(circulo.attributes('style')).toContain('var(--color-categoria-ocio)')
-    expect(filaCine.find('.descripcion-gasto').text()).toBe('Cine')
-    expect(filaCine.find('.metadatos-gasto').text()).toBe('Ocio · BCP · 2026-07-10')
-    expect(filaCine.find('.monto-gasto').text()).toContain('25.50')
-    expect(filaCine.find('.monto-gasto').text()).toContain('S/')
-    expect(filaCine.find('.indicador-editar').text()).toBe('Editar ›')
-
-    // Fila de "Varios" (categoría Otro, también colisiona → 2 caracteres, color "Otros").
-    const filaVarios = filas.find((f) => f.text().includes('Varios'))!
-    expect(filaVarios.find('.circulo-categoria').text()).toBe('OT')
-    expect(filaVarios.find('.monto-gasto').text()).toContain('$')
-
-    // Fila de "Taxi" (categoría Transporte, sin colisión → 1 carácter).
-    const filaTaxi = filas.find((f) => f.text().includes('Taxi'))!
-    expect(filaTaxi.find('.circulo-categoria').text()).toBe('T')
-    expect(filaTaxi.find('.circulo-categoria').attributes('style')).toContain(
-      'var(--color-categoria-transporte)',
-    )
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(2) // Cine y Varios (julio); Taxi (junio) queda fuera por defecto
+    expect(wrapper.text()).toContain('Cine')
+    expect(wrapper.text()).toContain('Varios')
+    expect(wrapper.text()).not.toContain('Taxi')
   })
 
-  it('la abreviatura se lee de `categoria.abreviatura` (calculada al cargar categorías), la fila no recalcula por su cuenta', async () => {
+  it('elegir "Todos los meses" muestra los 3 gastos', async () => {
     const wrapper = mount(HistorialView)
     await flushPromises()
 
-    const store = useGastosStore()
-    // El store ya contiene las categorías ENRIQUECIDAS por `cargarCategorias`
-    // (vía `calcularAbreviaturas`), aunque el fixture de Supabase no traía
-    // el campo `abreviatura`.
-    expect(store.categorias.find((c) => c.id === 'ocio')?.abreviatura).toBe('OC')
-    expect(store.categorias.find((c) => c.id === 'transporte')?.abreviatura).toBe('T')
+    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('')
 
-    // Si se muta la abreviatura directamente en el store, la fila debe
-    // reflejar ese valor tal cual (prueba de que lee del store y no la
-    // recomputa ella misma a partir del nombre).
-    const categoriaOcio = store.categorias.find((c) => c.id === 'ocio')!
-    categoriaOcio.abreviatura = 'ZZ'
-    await wrapper.vm.$nextTick()
-
-    const filaCine = wrapper.findAll('.fila-gasto').find((f) => f.text().includes('Cine'))!
-    expect(filaCine.find('.circulo-categoria').text()).toBe('ZZ')
+    expect(wrapper.findAll('tbody tr')).toHaveLength(3)
+    expect(wrapper.text()).toContain('Taxi')
   })
 
-  it('editar: clic en "Editar ›" abre el modal en modo edición con cabecera "Editar gasto" (regresión HU-3.3)', async () => {
+  it('filtro por mes: elegir "2026-06" deja solo el gasto de ese mes', async () => {
     const wrapper = mount(HistorialView)
     await flushPromises()
 
-    const filaCine = wrapper.findAll('.fila-gasto').find((f) => f.text().includes('Cine'))!
-    await filaCine.find('.indicador-editar').trigger('click')
+    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('2026-06')
 
-    expect(wrapper.find('[role="dialog"] h2').text()).toBe('Editar gasto')
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(1)
+    expect(filas[0].text()).toContain('Taxi')
   })
 
-  it('agrupado por fecha: cada gasto de un día distinto queda bajo su propio encabezado de grupo', async () => {
+  it('filtro por chip de moneda + "Todos los meses": "S/ Soles" deja solo Cine y Taxi (PEN)', async () => {
     const wrapper = mount(HistorialView)
     await flushPromises()
 
-    const encabezados = wrapper.findAll('.encabezado-grupo-fecha')
-    expect(encabezados).toHaveLength(3) // 3 gastos, 3 días distintos (10 jul, 15 jul, 1 jun)
-    expect(encabezados.map((e) => e.text())).toEqual(['10 de julio', '15 de julio', '1 de junio'])
+    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('')
+    await wrapper.findAll('.chip-moneda').find((c) => c.text() === 'S/ Soles')!.trigger('click')
 
-    // Filtros, totalizador y filas siguen intactos con el agrupado activo.
-    expect(wrapper.findComponent({ name: 'FiltrosHistorial' }).exists()).toBe(true)
-    expect(wrapper.find('.resumen-totalizador').exists()).toBe(true)
-    expect(wrapper.findAll('.fila-gasto')).toHaveLength(3)
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(2)
+    expect(wrapper.text()).toContain('Cine')
+    expect(wrapper.text()).toContain('Taxi')
+    expect(wrapper.text()).not.toContain('Varios')
   })
 
-  it('estado vacío genérico: sin ningún gasto, se muestra el mensaje genérico con CTA "Nuevo gasto" que abre el modal de alta', async () => {
+  it('filtro por categoría: elegir "Ocio" deja solo el gasto de esa categoría', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('')
+    await wrapper.find('select[aria-label="Filtrar por categoría"]').setValue('ocio')
+
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(1)
+    expect(filas[0].text()).toContain('Cine')
+  })
+
+  it('buscador de texto libre: escribir "cine" deja solo ese gasto (case-insensitive)', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('')
+    await wrapper.find('input[aria-label="Buscar por descripción"]').setValue('CINE')
+
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(1)
+    expect(filas[0].text()).toContain('Cine')
+  })
+
+  it('filtros combinables (mes por defecto = julio) + moneda "$ Dólares": solo Varios cumple ambas condiciones', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    await wrapper.findAll('.chip-moneda').find((c) => c.text() === '$ Dólares')!.trigger('click')
+
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(1)
+    expect(filas[0].text()).toContain('Varios')
+  })
+
+  it('blindaje Fase 2 "Caudal" (GATE 1): el select de categoría solo ofrece categorías de tipo "gasto", nunca "Otros ingresos"', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    const opciones = wrapper.findAll('select[aria-label="Filtrar por categoría"] option')
+    expect(opciones.map((o) => o.text())).not.toContain('Otros ingresos')
+  })
+
+  it('estado vacío genérico: sin ningún gasto, se muestra el mensaje genérico con CTA "Nuevo gasto" que abre el modal de alta, y no se muestran filtros', async () => {
     mockearCargaInicial({ gastos: [] })
     const wrapper = mount(HistorialView)
     await flushPromises()
 
     expect(wrapper.find('.estado-vacio-generico').exists()).toBe(true)
     expect(wrapper.find('.estado-vacio-filtro').exists()).toBe(false)
-    expect(wrapper.find('.lista-gastos').exists()).toBe(false)
-    // Sin gastos, los filtros ni siquiera se muestran (no tendría sentido filtrar nada).
     expect(wrapper.findComponent({ name: 'FiltrosHistorial' }).exists()).toBe(false)
 
     const cta = wrapper.find('.estado-vacio-generico button')
@@ -219,43 +244,116 @@ describe('HistorialView — fila del historial (HU-3.1)', () => {
 
     expect(wrapper.find('[role="dialog"] h2').text()).toBe('Nuevo gasto')
   })
-})
 
-describe('HistorialView — cruce con Épica 4 (HU-4.3): categoría desactivada sigue resolviendo nombre y color', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
+  it('estado vacío por filtro: hay gastos en total, pero el filtro activo no encuentra ninguno', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    // Julio (mes por defecto) + categoría "Transporte" (Taxi es de junio): ninguna fila cumple ambas.
+    await wrapper.find('select[aria-label="Filtrar por categoría"]').setValue('transporte')
+
+    expect(wrapper.findAll('tbody tr')).toHaveLength(0)
+    expect(wrapper.find('.estado-vacio-filtro').exists()).toBe(true)
+    expect(wrapper.find('.estado-vacio-generico').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Sin gastos con este filtro')
+    expect(wrapper.text()).toContain('Prueba cambiar el filtro o registra el primer gasto del mes.')
   })
 
-  it('un gasto que referencia una categoría desactivada sigue mostrando su nombre, abreviatura y color tras cargar (simula recarga de página)', async () => {
-    const categoriasConUnaInactiva = [
-      { id: 'ocio', usuario_id: 'u1', nombre: 'Ocio', predefinida: true, activa: true, creado_en: '' },
-      // "Transporte" fue desactivada (HU-4.3), pero `cargarCategorias` la
-      // sigue trayendo (sin filtro `activa`) precisamente para este caso.
-      {
-        id: 'transporte',
-        usuario_id: 'u1',
-        nombre: 'Transporte',
-        predefinida: true,
-        activa: false,
-        creado_en: '',
-      },
-    ] as unknown as Categoria[]
+  it('subtítulo del encabezado: "N movimientos en Julio 2026 · S/ X + $ Y"', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    const subtitulo = wrapper.find('.subtitulo-encabezado').text()
+    expect(subtitulo).toContain('2 movimientos en Julio 2026')
+    expect(subtitulo).toContain('25.50')
+    expect(subtitulo).toContain('12.00')
+  })
+
+  it('3 stat cards (moneda PEN, mes actual): Total del mes, Ticket promedio y Mayor gasto reflejan solo a Cine (el único gasto PEN de julio)', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    const kpis = wrapper.findAllComponents({ name: 'TarjetaKpi' })
+    expect(kpis).toHaveLength(3)
+
+    const total = kpis.find((k) => k.props('label') === 'Total del mes')!
+    const promedio = kpis.find((k) => k.props('label') === 'Ticket promedio')!
+    const mayor = kpis.find((k) => k.props('label') === 'Mayor gasto')!
+
+    expect(total.props('monto')).toBe(25.5)
+    expect(promedio.props('monto')).toBe(25.5)
+    expect(mayor.props('monto')).toBe(25.5)
+    expect(mayor.props('subtitulo')).toBe('Cine')
+  })
+
+  it('cambiar el toggle de moneda del encabezado a USD recalcula las 3 stat cards y el "por categoría", sin afectar la tabla filtrada por los chips', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    await wrapper.findComponent({ name: 'ToggleMoneda' }).vm.$emit('update:modelValue', 'USD')
+    await wrapper.vm.$nextTick()
+
+    const kpis = wrapper.findAllComponents({ name: 'TarjetaKpi' })
+    const total = kpis.find((k) => k.props('label') === 'Total del mes')!
+    expect(total.props('monto')).toBe(12)
+    expect(total.props('moneda')).toBe('USD')
+
+    const lista = wrapper.findComponent({ name: 'ListaGastoPorCategoria' })
+    expect(lista.props('moneda')).toBe('USD')
+    expect(lista.props('items')).toEqual([{ categoria_id: 'otro', nombre: 'Otro', total: 12 }])
+
+    // La tabla (gobernada por los chips de la fila de filtros, no por el toggle) sigue mostrando ambos gastos de julio.
+    expect(wrapper.findAll('tbody tr')).toHaveLength(2)
+  })
+
+  it('"Por categoría" (moneda PEN, mes actual): solo Ocio aparece, con el total de Cine', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    const lista = wrapper.findComponent({ name: 'ListaGastoPorCategoria' })
+    expect(lista.props('items')).toEqual([{ categoria_id: 'ocio', nombre: 'Ocio', total: 25.5 }])
+  })
+
+  it('borde: 0 movimientos en la moneda seleccionada no produce NaN en Ticket promedio ni en Mayor gasto', async () => {
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    // Junio solo tiene a Taxi (PEN); cambiar el toggle del encabezado a USD deja 0 movimientos ese mes.
+    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('2026-06')
+    await wrapper.findComponent({ name: 'ToggleMoneda' }).vm.$emit('update:modelValue', 'USD')
+    await wrapper.vm.$nextTick()
+
+    const kpis = wrapper.findAllComponents({ name: 'TarjetaKpi' })
+    const promedio = kpis.find((k) => k.props('label') === 'Ticket promedio')!
+    const mayor = kpis.find((k) => k.props('label') === 'Mayor gasto')!
+    expect(promedio.props('monto')).toBe(0)
+    expect(mayor.props('monto')).toBe(0)
+    expect(Number.isNaN(promedio.props('monto'))).toBe(false)
+  })
+})
+
+describe('HistorialView — cruce con Épica 4 (HU-4.3): categoría desactivada sigue resolviendo nombre en la tabla', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 4, 15)) // mayo 2026: el gasto histórico de este fixture es de mayo
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('un gasto que referencia una categoría desactivada sigue mostrando su nombre real (no "Sin categoría") tras cargar (simula recarga de página)', async () => {
+    const categoriasConUnaInactiva: Categoria[] = [
+      categoriaOcio,
+      { ...categoriaTransporte, activa: false },
+    ]
 
     const gastoHistoricoConCategoriaDesactivada: Gasto = {
+      ...gastoTaxi,
       id: 'g-hist',
-      usuario_id: 'u1',
-      categoria_id: 'transporte',
-      banco_id: 'b1',
-      monto: 15,
-      moneda: 'PEN',
       fecha: '2026-05-01',
       descripcion: 'Taxi viejo',
-      origen: 'manual',
-      estado: 'confirmado',
-      gmail_message_id: null,
-      gmail_fragmento: null,
-      creado_en: '',
-      actualizado_en: '',
     }
 
     mockearCargaInicial({
@@ -266,184 +364,11 @@ describe('HistorialView — cruce con Épica 4 (HU-4.3): categoría desactivada 
     const wrapper = mount(HistorialView)
     await flushPromises()
 
-    // La categoría desactivada sigue en el store (necesaria para resolver el
-    // gasto histórico), aunque en `CategoriasView` no se listaría.
     const store = useGastosStore()
     expect(store.categorias.find((c) => c.id === 'transporte')?.activa).toBe(false)
 
-    const fila = wrapper.findAll('.fila-gasto').find((f) => f.text().includes('Taxi viejo'))!
+    const fila = wrapper.findAll('tbody tr').find((f) => f.text().includes('Taxi viejo'))!
     expect(fila).toBeDefined()
-    // Nombre real de la categoría desactivada (no "Sin categoría").
-    expect(fila.find('.metadatos-gasto').text()).toBe('Transporte · BCP · 2026-05-01')
-    // Color real (mapa curado de "transporte"), no el color de respaldo "otros".
-    expect(fila.find('.circulo-categoria').attributes('style')).toContain(
-      'var(--color-categoria-transporte)',
-    )
-    expect(fila.find('.circulo-categoria').text()).toBe('T')
-  })
-})
-
-describe('HistorialView — filtros combinables (HU-3.2)', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    mockearCargaInicial()
-  })
-
-  it('filtro por chip de moneda: "S/ Soles" deja solo gastos en PEN y marca el chip activo', async () => {
-    const wrapper = mount(HistorialView)
-    await flushPromises()
-
-    const chipSoles = wrapper.findAll('.chip-moneda').find((c) => c.text() === 'S/ Soles')!
-    await chipSoles.trigger('click')
-
-    expect(wrapper.findAll('.fila-gasto')).toHaveLength(2) // Cine (PEN) y Taxi (PEN)
-    expect(wrapper.text()).toContain('Cine')
-    expect(wrapper.text()).toContain('Taxi')
-    expect(wrapper.text()).not.toContain('Varios') // Varios es USD
-
-    expect(chipSoles.classes()).toContain('activo')
-    const chipTodos = wrapper.findAll('.chip-moneda').find((c) => c.text() === 'Todos')!
-    expect(chipTodos.classes()).not.toContain('activo')
-  })
-
-  it('"Todos" quita el filtro de moneda tras haber activado "S/ Soles"', async () => {
-    const wrapper = mount(HistorialView)
-    await flushPromises()
-
-    await wrapper.findAll('.chip-moneda').find((c) => c.text() === 'S/ Soles')!.trigger('click')
-    expect(wrapper.findAll('.fila-gasto')).toHaveLength(2)
-
-    await wrapper.findAll('.chip-moneda').find((c) => c.text() === 'Todos')!.trigger('click')
-    expect(wrapper.findAll('.fila-gasto')).toHaveLength(3)
-  })
-
-  it('filtro por categoría: elegir "Ocio" deja solo el gasto de esa categoría', async () => {
-    const wrapper = mount(HistorialView)
-    await flushPromises()
-
-    const select = wrapper.find('select[aria-label="Filtrar por categoría"]')
-    await select.setValue('ocio')
-
-    expect(wrapper.findAll('.fila-gasto')).toHaveLength(1)
-    expect(wrapper.text()).toContain('Cine')
-    expect(wrapper.text()).not.toContain('Taxi')
-    expect(wrapper.text()).not.toContain('Varios')
-  })
-
-  it('filtro por mes: elegir "2026-06" deja solo los gastos de ese mes', async () => {
-    const wrapper = mount(HistorialView)
-    await flushPromises()
-
-    const select = wrapper.find('select[aria-label="Filtrar por mes"]')
-    await select.setValue('2026-06')
-
-    expect(wrapper.findAll('.fila-gasto')).toHaveLength(1)
-    expect(wrapper.text()).toContain('Taxi')
-  })
-
-  it('filtros combinables: moneda + categoría + mes aplican la intersección de los tres', async () => {
-    const wrapper = mount(HistorialView)
-    await flushPromises()
-
-    await wrapper.findAll('.chip-moneda').find((c) => c.text() === '$ Dólares')!.trigger('click')
-    await wrapper.find('select[aria-label="Filtrar por categoría"]').setValue('otro')
-    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('2026-07')
-
-    // Solo "Varios" (USD, categoría Otro, julio 2026) cumple las tres condiciones.
-    expect(wrapper.findAll('.fila-gasto')).toHaveLength(1)
-    expect(wrapper.text()).toContain('Varios')
-  })
-})
-
-describe('HistorialView — estado vacío por filtro (HU-3.4)', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    mockearCargaInicial()
-  })
-
-  it('filtro sin resultados con gastos existentes: muestra el estado vacío ESPECÍFICO, no el genérico', async () => {
-    const wrapper = mount(HistorialView)
-    await flushPromises()
-
-    // "Ocio" (PEN) combinado con moneda "$ Dólares": ninguna fila cumple ambas.
-    await wrapper.findAll('.chip-moneda').find((c) => c.text() === '$ Dólares')!.trigger('click')
-    await wrapper.find('select[aria-label="Filtrar por categoría"]').setValue('ocio')
-
-    expect(wrapper.findAll('.fila-gasto')).toHaveLength(0)
-    expect(wrapper.find('.estado-vacio-filtro').exists()).toBe(true)
-    expect(wrapper.find('.estado-vacio-generico').exists()).toBe(false) // no se confunden los dos estados
-    expect(wrapper.text()).toContain('Sin gastos con este filtro')
-    expect(wrapper.text()).toContain('Prueba cambiar el filtro o registra el primer gasto del mes.')
-  })
-
-  it('sin ningún gasto en absoluto, se ve el estado vacío GENÉRICO aunque no haya filtro activo (no el específico)', async () => {
-    mockearCargaInicial({ gastos: [] })
-    const wrapper = mount(HistorialView)
-    await flushPromises()
-
-    expect(wrapper.find('.estado-vacio-generico').exists()).toBe(true)
-    expect(wrapper.find('.estado-vacio-filtro').exists()).toBe(false)
-  })
-})
-
-describe('HistorialView — totalizador de moneda predominante', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    mockearCargaInicial()
-  })
-
-  it('sin filtro (fixture con mayoría PEN: 2 PEN + 1 USD): el totalizador muestra el total en PEN de los visibles', async () => {
-    const wrapper = mount(HistorialView)
-    await flushPromises()
-
-    // Cine (25.5 PEN) + Taxi (8 PEN) = 33.5; Varios (12 USD) no cuenta.
-    expect(wrapper.find('.resumen-totalizador').text()).toContain('S/')
-    expect(wrapper.find('.resumen-totalizador').text()).toContain('33.50')
-  })
-
-  it('filtro "$ Dólares": el totalizador muestra el total en USD del subconjunto filtrado, no del total sin filtrar', async () => {
-    const wrapper = mount(HistorialView)
-    await flushPromises()
-
-    await wrapper.findAll('.chip-moneda').find((c) => c.text() === '$ Dólares')!.trigger('click')
-
-    expect(wrapper.find('.resumen-totalizador').text()).toContain('$')
-    expect(wrapper.find('.resumen-totalizador').text()).toContain('12.00')
-  })
-
-  it('empate tras filtrar (1 PEN + 1 USD): el total mostrado es el del PEN', async () => {
-    const wrapper = mount(HistorialView)
-    await flushPromises()
-
-    // Filtrando por categoría "otro" o "ocio" deja 1 PEN + 1 USD de julio; se filtra por mes julio para dejar Cine (PEN) y Varios (USD).
-    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('2026-07')
-
-    expect(wrapper.findAll('.fila-gasto')).toHaveLength(2) // Cine (PEN) y Varios (USD)
-    expect(wrapper.find('.resumen-totalizador').text()).toContain('S/')
-    expect(wrapper.find('.resumen-totalizador').text()).toContain('25.50')
-  })
-
-  it('conjunto filtrado vacío: el totalizador no se renderiza (aparece el estado vacío por filtro en su lugar)', async () => {
-    const wrapper = mount(HistorialView)
-    await flushPromises()
-
-    await wrapper.findAll('.chip-moneda').find((c) => c.text() === '$ Dólares')!.trigger('click')
-    await wrapper.find('select[aria-label="Filtrar por categoría"]').setValue('ocio')
-
-    expect(wrapper.find('.resumen-totalizador').exists()).toBe(false)
-    expect(wrapper.find('.estado-vacio-filtro').exists()).toBe(true)
-  })
-
-  it('el total se recalcula al cambiar el filtro', async () => {
-    const wrapper = mount(HistorialView)
-    await flushPromises()
-
-    const totalInicial = wrapper.find('.resumen-totalizador').text()
-
-    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('2026-06')
-
-    const totalTrasFiltrar = wrapper.find('.resumen-totalizador').text()
-    expect(totalTrasFiltrar).not.toBe(totalInicial)
-    expect(totalTrasFiltrar).toContain('8.00') // Solo Taxi (PEN) queda en junio
+    expect(fila.text()).toContain('Transporte')
   })
 })

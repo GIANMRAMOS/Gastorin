@@ -235,3 +235,47 @@ describe('useMoneda — montoSinBancoPorMoneda', () => {
     expect(resultado).toEqual({ PEN: 25 })
   })
 })
+
+describe('useMoneda — totalesPorCategoria (Fase 2 "Caudal")', () => {
+  it('camino feliz: suma por categoría en la moneda pedida, ordenado de mayor a menor total', () => {
+    const { totalesPorCategoria } = useMoneda()
+    const resultado = totalesPorCategoria(
+      [
+        { categoria_id: 'c1', nombre: 'Comida', moneda: 'PEN', monto: 30 },
+        { categoria_id: 'c2', nombre: 'Transporte', moneda: 'PEN', monto: 100 },
+        { categoria_id: 'c1', nombre: 'Comida', moneda: 'PEN', monto: 20 },
+      ],
+      'PEN',
+    )
+    expect(resultado).toEqual([
+      { categoria_id: 'c2', nombre: 'Transporte', total: 100 },
+      { categoria_id: 'c1', nombre: 'Comida', total: 50 },
+    ])
+  })
+
+  it('filtra por moneda: los ítems de otra moneda no se cuentan ni aparecen', () => {
+    const { totalesPorCategoria } = useMoneda()
+    const resultado = totalesPorCategoria(
+      [
+        { categoria_id: 'c1', nombre: 'Comida', moneda: 'PEN', monto: 30 },
+        { categoria_id: 'c1', nombre: 'Comida', moneda: 'USD', monto: 999 },
+      ],
+      'PEN',
+    )
+    expect(resultado).toEqual([{ categoria_id: 'c1', nombre: 'Comida', total: 30 }])
+  })
+
+  it('sin exclusiones: a diferencia de saldosPorBanco, NINGUNA categoría se descarta (la categoría es obligatoria, no hay "No especificado")', () => {
+    const { totalesPorCategoria } = useMoneda()
+    const resultado = totalesPorCategoria(
+      [{ categoria_id: 'ci1', nombre: 'Otros ingresos', moneda: 'PEN', monto: 10 }],
+      'PEN',
+    )
+    expect(resultado).toEqual([{ categoria_id: 'ci1', nombre: 'Otros ingresos', total: 10 }])
+  })
+
+  it('conjunto vacío devuelve un array vacío', () => {
+    const { totalesPorCategoria } = useMoneda()
+    expect(totalesPorCategoria([], 'PEN')).toEqual([])
+  })
+})

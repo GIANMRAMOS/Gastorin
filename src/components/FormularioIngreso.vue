@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import ToggleMoneda from '@/components/ToggleMoneda.vue'
 import { useIngresos } from '@/composables/useIngresos'
 import { useIngresosStore } from '@/stores/ingresos'
+import { useGastosStore } from '@/stores/gastos'
 import type { Ingreso, IngresoInput } from '@/types/ingreso'
 import type { Moneda } from '@/types/gasto'
 
@@ -12,7 +13,13 @@ import type { Moneda } from '@/types/gasto'
  * prellenado; si no, arranca en modo alta. A diferencia de gastos, Ingreso
  * no tiene concepto de `origen === 'correo'`: todos los campos son siempre
  * editables en ambos modos. Los bancos se leen de `useIngresosStore`
- * (cargados por la vista contenedora vía `useBancos`).
+ * (cargados por la vista contenedora vía `useBancos`). Desde la migración
+ * `008` (Fase 2 "Caudal", Épica 12), el ingreso exige una categoría propia
+ * (`tipo === 'ingreso'`, catálogo separado del de Gasto): selector nativo en
+ * orden alfabético, mismo patrón que `FormularioGasto.vue`. La gestión de
+ * categorías de ingreso queda fuera de esta fase (no hay "+ Nueva categoría"
+ * inline: no existe precedente de ese patrón hoy en el repo, ni siquiera para
+ * bancos).
  */
 const props = defineProps<{
   ingreso?: Ingreso | null
@@ -36,6 +43,7 @@ function hoyISO(): string {
 
 const fecha = ref(props.ingreso?.fecha ?? hoyISO())
 const bancoId = ref(props.ingreso?.banco_id ?? '')
+const categoriaId = ref(props.ingreso?.categoria_id ?? '')
 const moneda = ref<Moneda | ''>(props.ingreso?.moneda ?? 'PEN')
 const importe = ref(props.ingreso ? String(props.ingreso.importe) : '')
 const concepto = ref(props.ingreso?.concepto ?? '')
@@ -43,15 +51,37 @@ const concepto = ref(props.ingreso?.concepto ?? '')
 const errorValidacion = ref<string | null>(null)
 
 const storeIngresos = useIngresosStore()
+const storeGastos = useGastosStore()
 const { crearIngreso, editarIngreso } = useIngresos()
 
 /** No hay bancos cargados: hay que bloquear el guardado (patrón "sin categorías"). */
 const sinBancos = computed(() => storeIngresos.bancos.length === 0)
 
+/**
+ * Categorías de INGRESO activas (el catálogo de categorías es una bolsa
+ * mixta de ambos tipos desde la migración 008; aquí solo se ofrecen las de
+ * `tipo === 'ingreso'`, nunca las de gasto).
+ */
+const categoriasActivas = computed(() =>
+  storeGastos.categorias.filter((c) => c.activa && c.tipo === 'ingreso'),
+)
+
+/** No hay categorías de ingreso activas cargadas: hay que bloquear el guardado (patrón "sin bancos"). */
+const sinCategorias = computed(() => categoriasActivas.value.length === 0)
+
+/** Mismas categorías, en orden alfabético (selector nativo, ahorra espacio en el modal). */
+const categoriasOrdenadas = computed(() =>
+  [...categoriasActivas.value].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' })),
+)
+
 /** Valida los campos antes de enviar (HU-11.2): todos bloquean antes de llamar al backend. */
 function validarFormulario(): boolean {
   if (sinBancos.value) {
     errorValidacion.value = 'No hay bancos; créalos primero.'
+    return false
+  }
+  if (sinCategorias.value) {
+    errorValidacion.value = 'No hay categorías de ingreso; créalas primero.'
     return false
   }
   const importeNumerico = Number(importe.value)
@@ -61,6 +91,10 @@ function validarFormulario(): boolean {
   }
   if (!bancoId.value) {
     errorValidacion.value = 'Selecciona un banco.'
+    return false
+  }
+  if (!categoriaId.value) {
+    errorValidacion.value = 'Selecciona una categoría.'
     return false
   }
   if (!moneda.value) {
@@ -88,6 +122,7 @@ async function manejarEnvio() {
 
   const input: IngresoInput = {
     banco_id: bancoId.value,
+    categoria_id: categoriaId.value,
     fecha: fecha.value,
     moneda: moneda.value as Moneda,
     importe: Number(importe.value),
@@ -110,6 +145,9 @@ async function manejarEnvio() {
     <p v-if="sinBancos" role="alert" class="mensaje-error">
       No hay bancos; créalos primero.
     </p>
+    <p v-else-if="sinCategorias" role="alert" class="mensaje-error">
+      No hay categorías de ingreso; créalas primero.
+    </p>
 
     <div class="grupo-campo">
       <label for="importe">Importe</label>
@@ -130,6 +168,16 @@ async function manejarEnvio() {
       <option value="PEN">PEN</option>
       <option value="USD">USD</option>
     </select>
+
+    <div class="grupo-campo">
+      <label for="categoria-ingreso">Categoría</label>
+      <select id="categoria-ingreso" v-model="categoriaId" class="entrada" :disabled="sinCategorias">
+        <option value="" disabled>Selecciona una categoría</option>
+        <option v-for="categoria in categoriasOrdenadas" :key="categoria.id" :value="categoria.id">
+          {{ categoria.nombre }}
+        </option>
+      </select>
+    </div>
 
     <div class="grupo-campo">
       <label for="banco">Banco</label>
@@ -156,7 +204,7 @@ async function manejarEnvio() {
 
     <button
       type="submit"
-      :disabled="storeIngresos.cargando || sinBancos"
+      :disabled="storeIngresos.cargando || sinBancos || sinCategorias"
       class="boton-primario"
       :class="{ cargando: storeIngresos.cargando }"
     >
@@ -165,3 +213,4 @@ async function manejarEnvio() {
     <button type="button" class="enlace-secundario" @click="emit('cerrar')">Cancelar</button>
   </form>
 </template>
+

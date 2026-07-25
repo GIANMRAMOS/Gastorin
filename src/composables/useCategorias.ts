@@ -1,7 +1,7 @@
 import { useAuthStore } from '@/stores/auth'
 import { useGastosStore } from '@/stores/gastos'
 import { supabase } from '@/lib/supabaseClient'
-import type { Categoria } from '@/types/gasto'
+import type { Categoria, TipoCategoria } from '@/types/gasto'
 
 /** Mensaje genérico cuando no hay una sesión activa (no debería ocurrir tras el guard de rutas). */
 const MENSAJE_SIN_SESION = 'No hay una sesión activa. Vuelve a iniciar sesión.'
@@ -78,11 +78,12 @@ export function useCategorias() {
   }
 
   /**
-   * Crea una categoría personalizada (`predefinida: false`, `activa: true`).
-   * Mapea la violación de unicidad Postgres (`usuario_id`, `nombre`) a un
-   * mensaje claro en español.
+   * Crea una categoría personalizada (`predefinida: false`, `activa: true`)
+   * del `tipo` indicado por el contexto de apertura del formulario (el
+   * usuario no elige el tipo). Mapea la violación de unicidad Postgres
+   * (ahora `usuario_id, nombre, tipo`) a un mensaje claro en español.
    */
-  async function crearCategoria(nombre: string) {
+  async function crearCategoria(nombre: string, tipo: TipoCategoria) {
     store.establecerCargando(true)
     store.limpiarError()
     try {
@@ -93,7 +94,7 @@ export function useCategorias() {
       }
       const { data, error } = await supabase
         .from('categorias')
-        .insert({ usuario_id: usuarioId, nombre, predefinida: false, activa: true })
+        .insert({ usuario_id: usuarioId, nombre, tipo, predefinida: false, activa: true })
         .select()
         .single()
       if (error) {

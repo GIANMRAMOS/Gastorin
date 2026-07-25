@@ -21,6 +21,11 @@ export interface Ingreso {
   id: string
   usuario_id: string
   banco_id: string
+  /**
+   * Categoría del ingreso (Épica 12, migración `008`), obligatoria: siempre
+   * de una categoría con `tipo === 'ingreso'` (ver `types/gasto.ts`).
+   */
+  categoria_id: string
   fecha: string
   moneda: Moneda
   importe: number
@@ -31,6 +36,7 @@ export interface Ingreso {
 /** Payload de alta de un ingreso (subconjunto editable por el usuario). */
 export interface IngresoInput {
   banco_id: string
+  categoria_id: string
   fecha: string
   moneda: Moneda
   importe: number

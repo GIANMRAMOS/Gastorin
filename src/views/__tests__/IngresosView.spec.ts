@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, type Mock } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import IngresosView from '@/views/IngresosView.vue'
@@ -17,6 +17,7 @@ const ingresoReciente: Ingreso = {
   id: 'i1',
   usuario_id: 'u1',
   banco_id: 'b1',
+  categoria_id: 'ci1',
   fecha: '2026-07-20',
   moneda: 'PEN',
   importe: 500,
@@ -28,6 +29,7 @@ const ingresoAntiguo: Ingreso = {
   id: 'i2',
   usuario_id: 'u1',
   banco_id: 'b1',
+  categoria_id: 'ci1',
   fecha: '2026-07-01',
   moneda: 'PEN',
   importe: 200,
@@ -35,9 +37,22 @@ const ingresoAntiguo: Ingreso = {
   created_at: '',
 }
 
+/**
+ * `HistorialView.spec.ts` es el equivalente de Egresos: aquí se cubre el
+ * espejo para Ingresos (rediseño "Caudal", Fase 2: `TablaMovimientos` en vez
+ * de la lista-de-tarjetas de la Fase 1).
+ */
 describe('IngresosView (HU-11.3)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    // El selector de mes arranca en el mes actual (ver `IngresosView.mesActualISO`):
+    // se fija "hoy" dentro de julio de 2026 para que coincida con los fixtures.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 6, 22))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('camino feliz: lista los ingresos ya ordenados por fecha descendente (orden garantizado por el composable) y muestra banco/moneda/importe/concepto', async () => {
@@ -64,8 +79,9 @@ describe('IngresosView (HU-11.3)', () => {
 
     expect(fromMock).toHaveBeenCalledWith('ingresos')
     expect(fromMock).toHaveBeenCalledWith('bancos')
+    expect(fromMock).toHaveBeenCalledWith('categorias')
 
-    const filas = wrapper.findAll('.fila-ingreso')
+    const filas = wrapper.findAll('tbody tr')
     expect(filas).toHaveLength(2)
     expect(filas[0].text()).toContain('Sueldo julio')
     expect(filas[0].text()).toContain('BCP')
@@ -82,7 +98,7 @@ describe('IngresosView (HU-11.3)', () => {
     const wrapper = mount(IngresosView)
     await flushPromises()
 
-    expect(wrapper.findAll('.fila-ingreso')).toHaveLength(0)
+    expect(wrapper.findAll('tbody tr')).toHaveLength(0)
     expect(wrapper.find('.estado-vacio').exists()).toBe(true)
     expect(wrapper.find('.mensaje-vacio').text()).toBe('Todavía no hay ingresos registrados.')
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
@@ -126,7 +142,7 @@ describe('IngresosView (HU-11.3)', () => {
    * Estas pruebas cubren HU-11.3 (editar) y HU-11.4 (eliminar con
    * confirmación), espejo de `HistorialView.spec.ts`. Se estuba `from()`
    * para que `cargarIngresos` cargue `ingresoReciente` (vía la ruta real de
-   * la vista) y `cargarBancos` devuelva una lista sin interferir.
+   * la vista) y `cargarBancos`/`cargarCategorias` devuelvan listas sin interferir.
    */
   describe('editar y eliminar ingreso (HU-11.3 / HU-11.4)', () => {
     beforeEach(() => {
@@ -134,11 +150,13 @@ describe('IngresosView (HU-11.3)', () => {
         const builder = crearConstructorConsulta()
         if (tabla === 'ingresos') {
           ;(builder.order as Mock).mockResolvedValue({ data: [ingresoReciente], error: null })
-        } else {
+        } else if (tabla === 'bancos') {
           ;(builder.order as Mock).mockResolvedValue({
             data: [{ id: 'b1', usuario_id: 'u1', nombre: 'BCP', created_at: '' }],
             error: null,
           })
+        } else {
+          ;(builder.order as Mock).mockResolvedValue({ data: [], error: null })
         }
         return builder
       })
@@ -150,8 +168,7 @@ describe('IngresosView (HU-11.3)', () => {
 
       expect(wrapper.findComponent({ name: 'ModalIngreso' }).exists()).toBe(false)
 
-      const botonEditar = wrapper.findAll('li button').find((b) => b.text() === 'Editar ›')!
-      await botonEditar.trigger('click')
+      await wrapper.find('.boton-editar').trigger('click')
 
       const modal = wrapper.findComponent({ name: 'ModalIngreso' })
       expect(modal.exists()).toBe(true)
@@ -169,7 +186,7 @@ describe('IngresosView (HU-11.3)', () => {
       expect(modal.props('ingreso')).toBeNull()
     })
 
-    it('pide confirmación antes de borrar: clic en "Eliminar" abre el diálogo pero no borra de inmediato', async () => {
+    it('pide confirmación antes de borrar: clic en "×" abre el diálogo pero no borra de inmediato', async () => {
       const store = useIngresosStore()
 
       const wrapper = mount(IngresosView)
@@ -177,8 +194,7 @@ describe('IngresosView (HU-11.3)', () => {
 
       expect(wrapper.find('[role="alertdialog"]').exists()).toBe(false)
 
-      const botonEliminar = wrapper.findAll('li button').find((b) => b.text() === 'Eliminar')!
-      await botonEliminar.trigger('click')
+      await wrapper.find('.boton-eliminar').trigger('click')
       await flushPromises()
 
       expect(wrapper.find('[role="alertdialog"]').exists()).toBe(true)
@@ -193,8 +209,7 @@ describe('IngresosView (HU-11.3)', () => {
 
       expect(wrapper.text()).toContain('Sueldo julio')
 
-      const botonEliminar = wrapper.findAll('li button').find((b) => b.text() === 'Eliminar')!
-      await botonEliminar.trigger('click')
+      await wrapper.find('.boton-eliminar').trigger('click')
       await flushPromises()
 
       const builder = crearConstructorConsulta()
@@ -216,8 +231,7 @@ describe('IngresosView (HU-11.3)', () => {
       const wrapper = mount(IngresosView)
       await flushPromises()
 
-      const botonEliminar = wrapper.findAll('li button').find((b) => b.text() === 'Eliminar')!
-      await botonEliminar.trigger('click')
+      await wrapper.find('.boton-eliminar').trigger('click')
       await flushPromises()
 
       expect(wrapper.find('[role="alertdialog"]').exists()).toBe(true)
@@ -236,8 +250,7 @@ describe('IngresosView (HU-11.3)', () => {
       const wrapper = mount(IngresosView)
       await flushPromises()
 
-      const botonEliminar = wrapper.findAll('li button').find((b) => b.text() === 'Eliminar')!
-      await botonEliminar.trigger('click')
+      await wrapper.find('.boton-eliminar').trigger('click')
       await flushPromises()
 
       expect(wrapper.find('[role="alertdialog"]').text()).toContain(

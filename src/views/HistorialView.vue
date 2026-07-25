@@ -3,40 +3,48 @@ import { computed, onMounted, ref } from 'vue'
 import ModalGasto from '@/components/ModalGasto.vue'
 import DialogoConfirmacion from '@/components/DialogoConfirmacion.vue'
 import FiltrosHistorial from '@/components/FiltrosHistorial.vue'
+import TarjetaKpi from '@/components/TarjetaKpi.vue'
+import ListaGastoPorCategoria from '@/components/ListaGastoPorCategoria.vue'
+import TablaMovimientos, { type FilaMovimiento } from '@/components/TablaMovimientos.vue'
+import ToggleMoneda from '@/components/ToggleMoneda.vue'
 import { useGastos } from '@/composables/useGastos'
 import { useCategorias } from '@/composables/useCategorias'
 import { useBancos } from '@/composables/useBancos'
-import { useColorCategoria } from '@/composables/useColorCategoria'
 import { useGastosStore } from '@/stores/gastos'
 import { useIngresosStore } from '@/stores/ingresos'
 import { useMoneda } from '@/composables/useMoneda'
-import { agruparPorFecha } from '@/composables/useFechas'
+import { formatearMes } from '@/composables/useFechas'
 import type { Gasto, Moneda } from '@/types/gasto'
 
 /**
- * Historial de gastos ampliado (Épica 3): lista con círculo de abreviatura,
- * filtros combinables por moneda/categoría/banco/mes y estados vacíos
- * distintos según haya o no gastos en total. Cubre además el alta, edición y
- * eliminación de gastos (Épica 2), y el retrofit de banco obligatorio
- * (migración `006`).
+ * "Egresos" (rediseño "Caudal", Fase 2; ruta y nombre de archivo siguen
+ * siendo `historial`/`HistorialView`, el label del nav ya es "Egresos"):
+ * header con subtítulo del mes + toggle de moneda, filtros (moneda/buscador/
+ * categoría/banco/mes), 3 `TarjetaKpi` (Total del mes / Ticket promedio /
+ * Mayor gasto), `TablaMovimientos` y un sidebar con "Registrar" + "Por
+ * categoría". Reemplaza la lista-de-tarjetas agrupada por día de la Fase 1.
+ * Cubre además el alta, edición y eliminación de gastos (Épica 2).
  */
 const { cargarGastos, eliminarGasto } = useGastos()
 const { cargarCategorias } = useCategorias()
 const { cargarBancos } = useBancos()
-const { colorCategoria: colorPorNombre } = useColorCategoria()
 const storeGastos = useGastosStore()
 const storeIngresos = useIngresosStore()
-const { formatearMonto, resumenMonedaPredominante } = useMoneda()
+const { formatearMonto, totalesPorCategoria } = useMoneda()
 
 const modalAbierto = ref(false)
 const gastoEnEdicion = ref<Gasto | null>(null)
 const gastoAEliminar = ref<Gasto | null>(null)
 
-/** Filtros de UI del historial (estado local de la vista, no del store). */
+/** Filtros de UI de Egresos (estado local de la vista, no del store). */
 const monedaFiltro = ref<'todos' | Moneda>('todos')
 const categoriaFiltro = ref('')
 const bancoFiltro = ref('')
-const mesFiltro = ref('')
+const mesFiltro = ref(mesActualISO())
+const busquedaFiltro = ref('')
+
+/** Moneda que gobierna las 3 stat cards y el sidebar "Por categoría" (independiente de los chips de la fila de filtros, que solo filtran la tabla). */
+const monedaSeleccionada = ref<Moneda>('PEN')
 
 onMounted(() => {
   cargarCategorias()
@@ -44,81 +52,139 @@ onMounted(() => {
   cargarGastos()
 })
 
-/** Nombre del banco de un gasto (para mostrarlo en los metadatos de la fila). */
+/** Prefijo `YYYY-MM` del mes actual, en hora LOCAL (nunca `toISOString()`, ver `hoyISO` de `FormularioGasto.vue`). */
+function mesActualISO(): string {
+  const ahora = new Date()
+  const anio = ahora.getFullYear()
+  const mes = String(ahora.getMonth() + 1).padStart(2, '0')
+  return `${anio}-${mes}`
+}
+
+/** Categorías de GASTO activas (blindaje: `storeGastos.categorias` es una bolsa mixta de ambos tipos desde la migración 008). */
+const categoriasGasto = computed(() => storeGastos.categorias.filter((c) => c.tipo === 'gasto'))
+
+/** Nombre del banco de un gasto (para mostrarlo en la fila de la tabla). */
 function nombreBanco(bancoId: string): string {
   return storeIngresos.bancos.find((banco) => banco.id === bancoId)?.nombre ?? 'Sin banco'
 }
 
-/** Busca la categoría de un gasto por su id (para nombre, color y abreviatura). */
-function categoriaDe(categoriaId: string) {
-  return storeGastos.categorias.find((c) => c.id === categoriaId)
-}
-
-/** Nombre de la categoría de un gasto (para mostrarlo en la fila). */
+/** Nombre de la categoría de un gasto (para mostrarlo en la fila y en el "por categoría"). */
 function nombreCategoria(categoriaId: string): string {
-  return categoriaDe(categoriaId)?.nombre ?? 'Sin categoría'
+  return storeGastos.categorias.find((c) => c.id === categoriaId)?.nombre ?? 'Sin categoría'
 }
 
-/** Color asociado a la categoría, derivado de su nombre (mismo helper que el resto de la app). */
-function colorCategoria(categoriaId: string): string {
-  return colorPorNombre(categoriaDe(categoriaId)?.nombre)
-}
-
-/** Abreviatura de la categoría (leída del store, no recalculada por fila). */
-function abreviaturaCategoria(categoriaId: string): string {
-  return categoriaDe(categoriaId)?.abreviatura ?? '?'
-}
-
-/**
- * Monto formateado de un gasto del historial. `cargarGastos` filtra a
- * `estado='confirmado'`, así que `monto`/`moneda` siempre están completos
- * aquí (solo pueden ser `null` en `estado='revision_manual'`, propio de la
- * bandeja de borradores); el `null` es solo defensivo por el tipo.
- */
-function montoFormateado(gasto: Gasto): string {
-  if (gasto.monto == null || gasto.moneda == null) return ''
-  return formatearMonto(gasto.monto, gasto.moneda)
-}
-
-/** Meses (`YYYY-MM`) con al menos un gasto, únicos y ordenados descendente. */
+/** Meses (`YYYY-MM`) con al menos un gasto, más el mes actual (para que el selector siempre pueda mostrarlo aunque no tenga movimientos todavía), únicos y ordenados descendente. */
 const mesesDisponibles = computed(() => {
   const meses = new Set(storeGastos.gastos.map((gasto) => gasto.fecha.slice(0, 7)))
+  meses.add(mesActualISO())
   return [...meses].sort((a, b) => b.localeCompare(a))
 })
 
-/** Gastos que cumplen la intersección de los 3 filtros activos (moneda, categoría, mes). */
+/** No hay ningún gasto registrado (estado vacío genérico). */
+const sinGastos = computed(() => storeGastos.gastos.length === 0)
+
+/**
+ * Gastos del mes seleccionado (o de TODOS si "mes" = "Todos los meses"),
+ * SIN aplicar el resto de los filtros: base de las 3 stat cards, el
+ * subtítulo del encabezado y el "por categoría" (mismo criterio que las
+ * KPI de `DashboardView`: no se ven afectadas por los chips/selects que solo
+ * filtran la tabla de abajo).
+ */
+const gastosDelMes = computed(() =>
+  storeGastos.gastos.filter((gasto) => !mesFiltro.value || gasto.fecha.slice(0, 7) === mesFiltro.value),
+)
+
+/** Gastos del mes que además cumplen moneda/categoría/banco/búsqueda: fuente de la tabla. */
 const gastosFiltrados = computed(() => {
-  return storeGastos.gastos.filter((gasto) => {
+  const busqueda = busquedaFiltro.value.trim().toLowerCase()
+  return gastosDelMes.value.filter((gasto) => {
     const cumpleMoneda = monedaFiltro.value === 'todos' || gasto.moneda === monedaFiltro.value
     const cumpleCategoria = !categoriaFiltro.value || gasto.categoria_id === categoriaFiltro.value
     const cumpleBanco = !bancoFiltro.value || gasto.banco_id === bancoFiltro.value
-    const cumpleMes = !mesFiltro.value || gasto.fecha.slice(0, 7) === mesFiltro.value
-    return cumpleMoneda && cumpleCategoria && cumpleBanco && cumpleMes
+    const cumpleBusqueda = !busqueda || (gasto.descripcion ?? '').toLowerCase().includes(busqueda)
+    return cumpleMoneda && cumpleCategoria && cumpleBanco && cumpleBusqueda
   })
 })
 
-/** No hay ningún gasto registrado (HU-3.1: estado vacío genérico). */
-const sinGastos = computed(() => storeGastos.gastos.length === 0)
+/** Hay gastos en total, pero el filtro activo no encuentra ninguno (estado vacío específico). */
+const sinResultadosPorFiltro = computed(() => !sinGastos.value && gastosFiltrados.value.length === 0)
 
-/** Hay gastos en total, pero el filtro activo no encuentra ninguno (HU-3.4). */
-const sinResultadosPorFiltro = computed(
-  () => !sinGastos.value && gastosFiltrados.value.length === 0,
+/** Filas ya enriquecidas para `TablaMovimientos`. Los gastos confirmados nunca tienen `monto`/`moneda` en `null` (solo ocurre en `estado='revision_manual'`, propio de la bandeja de borradores). */
+const filasTabla = computed<FilaMovimiento[]>(() =>
+  gastosFiltrados.value.map((gasto) => ({
+    id: gasto.id,
+    fecha: gasto.fecha,
+    descripcion: gasto.descripcion || nombreCategoria(gasto.categoria_id),
+    nombreCategoria: nombreCategoria(gasto.categoria_id),
+    nombreBanco: nombreBanco(gasto.banco_id),
+    monto: gasto.monto ?? 0,
+    moneda: gasto.moneda ?? 'PEN',
+  })),
 )
 
-/**
- * Gastos filtrados agrupados por día. `gastosFiltrados` ya viene ordenado
- * desc (mismo orden de `store.gastos`), así que el agrupador no reordena.
- */
-const gruposGastos = computed(() => agruparPorFecha(gastosFiltrados.value, (gasto) => gasto.fecha))
+/** Total del mes en PEN (para el subtítulo del encabezado, independiente de la moneda seleccionada). */
+const totalPenDelMes = computed(() =>
+  gastosDelMes.value.filter((g) => g.moneda === 'PEN').reduce((total, g) => total + (g.monto ?? 0), 0),
+)
+/** Total del mes en USD (para el subtítulo del encabezado). */
+const totalUsdDelMes = computed(() =>
+  gastosDelMes.value.filter((g) => g.moneda === 'USD').reduce((total, g) => total + (g.monto ?? 0), 0),
+)
 
-/**
- * Totalizador de la moneda predominante sobre el conjunto ya filtrado. Los
- * gastos confirmados nunca tienen `monto`/`moneda` en `null` (mismo guard que
- * `montoFormateado`); el `!` solo replica esa garantía existente.
- */
-const resumenGastos = computed(() =>
-  resumenMonedaPredominante(
-    gastosFiltrados.value.map((gasto) => ({ moneda: gasto.moneda!, monto: gasto.monto! })),
+/** "S/ X + $ Y" (omite una moneda si su total es 0; si ambas son 0, muestra "S/ 0.00"). */
+const textoTotalesDelMes = computed(() => {
+  const partes: string[] = []
+  if (totalPenDelMes.value > 0) partes.push(formatearMonto(totalPenDelMes.value, 'PEN'))
+  if (totalUsdDelMes.value > 0) partes.push(formatearMonto(totalUsdDelMes.value, 'USD'))
+  return partes.length > 0 ? partes.join(' + ') : formatearMonto(0, 'PEN')
+})
+
+/** Subtítulo del encabezado: "N movimientos en {Mes} {Año} · S/ X + $ Y". */
+const subtituloEncabezado = computed(() => {
+  const etiquetaMes = mesFiltro.value ? formatearMes(mesFiltro.value) : 'todos los períodos'
+  return `${gastosDelMes.value.length} movimientos en ${etiquetaMes} · ${textoTotalesDelMes.value}`
+})
+
+/** Gastos del mes en la moneda del toggle del encabezado (base de las 3 stat cards). */
+const gastosDelMesEnMonedaSeleccionada = computed(() =>
+  gastosDelMes.value.filter((gasto) => gasto.moneda === monedaSeleccionada.value),
+)
+
+/** Total del mes en la moneda seleccionada (1ª stat card). */
+const totalDelMes = computed(() =>
+  gastosDelMesEnMonedaSeleccionada.value.reduce((total, g) => total + (g.monto ?? 0), 0),
+)
+
+/** Ticket promedio = total ÷ cantidad; sin dividir por cero si no hay movimientos (2ª stat card). */
+const ticketPromedio = computed(() => {
+  const cantidad = gastosDelMesEnMonedaSeleccionada.value.length
+  return cantidad > 0 ? totalDelMes.value / cantidad : 0
+})
+
+/** Gasto de mayor monto del mes en la moneda seleccionada, o `null` si no hay ninguno (3ª stat card). */
+const mayorGasto = computed<Gasto | null>(() =>
+  gastosDelMesEnMonedaSeleccionada.value.reduce<Gasto | null>(
+    (mayor, gasto) => (mayor === null || (gasto.monto ?? 0) > (mayor.monto ?? 0) ? gasto : mayor),
+    null,
+  ),
+)
+const montoMayorGasto = computed(() => mayorGasto.value?.monto ?? 0)
+const subtituloMayorGasto = computed(() => {
+  const gasto = mayorGasto.value
+  if (!gasto) return undefined
+  return gasto.descripcion || nombreCategoria(gasto.categoria_id)
+})
+
+/** "Por categoría" del sidebar: totales del mes por categoría, en la moneda seleccionada. */
+const porCategoria = computed(() =>
+  totalesPorCategoria(
+    gastosDelMes.value.map((gasto) => ({
+      categoria_id: gasto.categoria_id,
+      nombre: nombreCategoria(gasto.categoria_id),
+      moneda: gasto.moneda ?? 'PEN',
+      monto: gasto.monto ?? 0,
+    })),
+    monedaSeleccionada.value,
   ),
 )
 
@@ -132,6 +198,12 @@ function abrirModalAlta() {
 function abrirModalEdicion(gasto: Gasto) {
   gastoEnEdicion.value = gasto
   modalAbierto.value = true
+}
+
+/** Resuelve el id emitido por `TablaMovimientos` al gasto real antes de abrir el modal de edición. */
+function abrirModalEdicionPorId(id: string) {
+  const gasto = storeGastos.gastos.find((g) => g.id === id)
+  if (gasto) abrirModalEdicion(gasto)
 }
 
 /** Cierra el modal de alta/edición sin guardar. */
@@ -150,6 +222,12 @@ function pedirConfirmacionEliminar(gasto: Gasto) {
   gastoAEliminar.value = gasto
 }
 
+/** Resuelve el id emitido por `TablaMovimientos` al gasto real antes de pedir confirmación. */
+function pedirConfirmacionEliminarPorId(id: string) {
+  const gasto = storeGastos.gastos.find((g) => g.id === id)
+  if (gasto) pedirConfirmacionEliminar(gasto)
+}
+
 /** Cancela la eliminación: no se borra nada. */
 function cancelarEliminacion() {
   gastoAEliminar.value = null
@@ -164,13 +242,19 @@ async function confirmarEliminacion() {
 </script>
 
 <template>
-  <main class="pagina-historial">
-    <div class="cabecera-historial">
-      <h1>Historial</h1>
-      <button type="button" class="boton-primario boton-nuevo" @click="abrirModalAlta">
-        + Nuevo gasto
-      </button>
-    </div>
+  <main class="pagina-egresos">
+    <header class="encabezado-egresos">
+      <div class="titulo-encabezado">
+        <h1>Egresos</h1>
+        <p class="subtitulo-encabezado">{{ subtituloEncabezado }}</p>
+      </div>
+      <div class="acciones-encabezado">
+        <ToggleMoneda v-model="monedaSeleccionada" mostrar-simbolo />
+        <button type="button" class="boton-registrar boton-nuevo" @click="abrirModalAlta">
+          + Nuevo egreso
+        </button>
+      </div>
+    </header>
 
     <p v-if="storeGastos.error" role="alert" class="mensaje-error">{{ storeGastos.error }}</p>
 
@@ -180,57 +264,64 @@ async function confirmarEliminacion() {
       v-model:categoria-id="categoriaFiltro"
       v-model:banco-id="bancoFiltro"
       v-model:mes="mesFiltro"
-      :categorias="storeGastos.categorias"
+      v-model:busqueda="busquedaFiltro"
+      :categorias="categoriasGasto"
       :bancos="storeIngresos.bancos"
       :meses-disponibles="mesesDisponibles"
     />
 
-    <p v-if="resumenGastos" class="resumen-totalizador">
-      Total {{ formatearMonto(resumenGastos.total, resumenGastos.moneda) }}
-    </p>
-
-    <div v-if="gastosFiltrados.length > 0" class="grupos-gastos">
-      <div v-for="grupo in gruposGastos" :key="grupo.etiqueta + grupo.items[0].id" class="grupo-fecha">
-        <h2 class="encabezado-grupo-fecha">{{ grupo.etiqueta }}</h2>
-        <ul class="lista-gastos">
-          <li v-for="gasto in grupo.items" :key="gasto.id" class="fila-gasto">
-            <span class="circulo-categoria" :style="{ background: colorCategoria(gasto.categoria_id) }">
-              {{ abreviaturaCategoria(gasto.categoria_id) }}
-            </span>
-
-            <div class="detalle-gasto">
-              <p class="descripcion-gasto">{{ gasto.descripcion || nombreCategoria(gasto.categoria_id) }}</p>
-              <p class="metadatos-gasto">
-                {{ nombreCategoria(gasto.categoria_id) }} · {{ nombreBanco(gasto.banco_id) }} · {{ gasto.fecha }}
-              </p>
-            </div>
-
-            <p class="monto-gasto">{{ montoFormateado(gasto) }}</p>
-
-            <div class="acciones-gasto">
-              <button type="button" class="enlace-secundario indicador-editar" @click="abrirModalEdicion(gasto)">
-                Editar ›
-              </button>
-              <button type="button" class="enlace-secundario" @click="pedirConfirmacionEliminar(gasto)">
-                Eliminar
-              </button>
-            </div>
-          </li>
-        </ul>
-      </div>
+    <div v-if="!sinGastos" class="fila-kpis">
+      <TarjetaKpi label="Total del mes" :monto="totalDelMes" :moneda="monedaSeleccionada" variante="egreso" />
+      <TarjetaKpi
+        label="Ticket promedio"
+        :monto="ticketPromedio"
+        :moneda="monedaSeleccionada"
+        variante="egreso"
+      />
+      <TarjetaKpi
+        label="Mayor gasto"
+        :monto="montoMayorGasto"
+        :moneda="monedaSeleccionada"
+        variante="egreso"
+        :subtitulo="subtituloMayorGasto"
+      />
     </div>
 
-    <div v-else-if="sinGastos" class="estado-vacio estado-vacio-generico">
+    <div v-if="!sinGastos" class="grid-egresos">
+      <section class="columna-tabla">
+        <TablaMovimientos
+          v-if="gastosFiltrados.length > 0"
+          :filas="filasTabla"
+          :total-sin-filtrar="gastosDelMes.length"
+          @editar="abrirModalEdicionPorId"
+          @eliminar="pedirConfirmacionEliminarPorId"
+        />
+        <div v-else-if="sinResultadosPorFiltro" class="estado-vacio estado-vacio-filtro">
+          <span class="icono-vacio-filtro" aria-hidden="true">🔍</span>
+          <p class="mensaje-vacio">Sin gastos con este filtro</p>
+          <p class="sugerencia-vacio">Prueba cambiar el filtro o registra el primer gasto del mes.</p>
+        </div>
+      </section>
+
+      <aside class="columna-lateral-egresos">
+        <div class="tarjeta-lateral tarjeta-registrar">
+          <h2>Registrar un egreso</h2>
+          <button type="button" class="boton-primario boton-nuevo" @click="abrirModalAlta">
+            + Nuevo egreso
+          </button>
+        </div>
+        <div class="tarjeta-lateral">
+          <h2>Por categoría</h2>
+          <ListaGastoPorCategoria :items="porCategoria" :moneda="monedaSeleccionada" />
+        </div>
+      </aside>
+    </div>
+
+    <div v-else class="estado-vacio estado-vacio-generico">
       <p class="mensaje-vacio">Todavía no hay gastos registrados.</p>
       <button type="button" class="boton-primario boton-nuevo" @click="abrirModalAlta">
         Nuevo gasto
       </button>
-    </div>
-
-    <div v-else-if="sinResultadosPorFiltro" class="estado-vacio estado-vacio-filtro">
-      <span class="icono-vacio-filtro" aria-hidden="true">🔍</span>
-      <p class="mensaje-vacio">Sin gastos con este filtro</p>
-      <p class="sugerencia-vacio">Prueba cambiar el filtro o registra el primer gasto del mes.</p>
     </div>
 
     <ModalGasto
@@ -250,119 +341,101 @@ async function confirmarEliminacion() {
 </template>
 
 <style scoped>
-.pagina-historial {
-  max-width: 720px;
+.pagina-egresos {
+  max-width: 1080px;
   margin: 0 auto;
   padding: var(--espacio-6) var(--espacio-4);
 }
 
-.cabecera-historial {
+.encabezado-egresos {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--espacio-4);
   margin-bottom: var(--espacio-6);
+  flex-wrap: wrap;
 }
 
-.cabecera-historial h1 {
-  font-size: clamp(20px, 4vw, 26px);
+.titulo-encabezado h1 {
   margin: 0;
+  font-weight: 600;
+  font-size: 21px;
+  letter-spacing: -0.02em;
 }
 
-.boton-nuevo {
-  width: auto;
-  min-height: 44px;
-  margin-top: 0;
-  padding: 0 var(--espacio-4);
+.subtitulo-encabezado {
+  margin: var(--espacio-1) 0 0;
+  font-weight: 400;
+  font-size: 12.5px;
+  color: rgba(0, 0, 0, 0.5);
 }
 
-.grupos-gastos {
-  display: flex;
-  flex-direction: column;
-  gap: var(--espacio-4);
-}
-
-.encabezado-grupo-fecha {
-  margin: 0 0 var(--espacio-2);
-  font-size: var(--tamano-pequeno);
-  font-weight: 700;
-  color: var(--color-texto-secundario);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-}
-
-.lista-gastos {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--espacio-2);
-}
-
-.fila-gasto {
+.acciones-encabezado {
   display: flex;
   align-items: center;
   gap: var(--espacio-3);
+  flex-shrink: 0;
+}
+
+.boton-registrar {
+  min-height: 40px;
+  padding: 0 var(--espacio-4);
+  background: #1a1a18;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  font-weight: 600;
+  font-size: var(--tamano-pequeno);
+  cursor: pointer;
+  font-family: var(--fuente-base);
+  margin-top: 0;
+}
+.boton-registrar:hover {
+  background: var(--color-primario-hover);
+}
+
+.fila-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: var(--espacio-4);
+}
+
+.grid-egresos {
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.columna-tabla {
   background: var(--color-fondo);
   border: 1px solid var(--color-borde-tarjeta);
-  border-radius: 18px;
-  padding: var(--espacio-3) var(--espacio-4);
-}
-
-.circulo-categoria {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  color: #fff;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.detalle-gasto {
-  flex: 1;
+  border-radius: var(--radio-tarjeta);
+  padding: var(--espacio-4);
   min-width: 0;
 }
 
-.descripcion-gasto {
-  margin: 0;
-  font-weight: 700;
-  color: var(--color-texto);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.metadatos-gasto {
-  margin: 2px 0 0;
-  font-size: var(--tamano-pequeno);
-  color: var(--color-texto-secundario);
-}
-
-.monto-gasto {
-  margin: 0;
-  font-weight: 700;
-  color: var(--color-texto);
-  white-space: nowrap;
-}
-
-.acciones-gasto {
+.columna-lateral-egresos {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+  gap: 16px;
 }
 
-.acciones-gasto button {
-  margin-top: 0;
-  padding: 0;
+.tarjeta-lateral {
+  background: var(--color-fondo);
+  border: 1px solid var(--color-borde-tarjeta);
+  border-radius: var(--radio-tarjeta);
+  padding: var(--espacio-4);
 }
 
-.indicador-editar {
-  font-weight: 600;
+.tarjeta-lateral h2 {
+  margin: 0 0 var(--espacio-4);
+  font-size: 1rem;
+}
+
+.tarjeta-registrar .boton-nuevo {
+  width: 100%;
 }
 
 .estado-vacio {
@@ -387,9 +460,13 @@ async function confirmarEliminacion() {
   margin: 0;
 }
 
-.resumen-totalizador {
-  margin: 0 0 var(--espacio-3);
-  font-weight: 700;
-  color: var(--color-texto);
+@media (max-width: 900px) {
+  .fila-kpis {
+    grid-template-columns: 1fr;
+  }
+
+  .grid-egresos {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

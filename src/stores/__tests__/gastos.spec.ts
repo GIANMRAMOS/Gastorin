@@ -7,6 +7,7 @@ const categoriaFalsa: Categoria = {
   id: 'c1',
   usuario_id: 'u1',
   nombre: 'Comida',
+  tipo: 'gasto',
   predefinida: true,
   activa: true,
   creado_en: '',

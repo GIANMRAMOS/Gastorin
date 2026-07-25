@@ -17,6 +17,7 @@ const categoriaBase: Categoria = {
   id: 'c1',
   usuario_id: 'u1',
   nombre: 'Comida',
+  tipo: 'gasto',
   predefinida: true,
   activa: true,
   creado_en: '',
@@ -90,13 +91,14 @@ describe('useCategorias', () => {
   })
 
   describe('crearCategoria', () => {
-    it('camino feliz: inserta con usuario_id explícito, predefinida false y activa true, y recalcula abreviaturas', async () => {
+    it('camino feliz: inserta con usuario_id explícito, tipo recibido, predefinida false y activa true, y recalcula abreviaturas', async () => {
       const builder = crearConstructorConsulta()
       fromMock.mockReturnValueOnce(builder)
       const categoriaCreada = {
         id: 'c2',
         usuario_id: 'u1',
         nombre: 'Mascotas',
+        tipo: 'gasto',
         predefinida: false,
         activa: true,
         creado_en: '',
@@ -110,19 +112,50 @@ describe('useCategorias', () => {
       store.establecerCategorias([categoriaBase])
 
       const { crearCategoria } = useCategorias()
-      const exito = await crearCategoria('Mascotas')
+      const exito = await crearCategoria('Mascotas', 'gasto')
 
       expect(exito).toBe(true)
       expect(fromMock).toHaveBeenCalledWith('categorias')
       expect(builder.insert).toHaveBeenCalledWith({
         usuario_id: 'u1',
         nombre: 'Mascotas',
+        tipo: 'gasto',
         predefinida: false,
         activa: true,
       })
       expect(store.categorias).toHaveLength(2)
       expect(store.categorias.find((c) => c.id === 'c2')?.abreviatura).toBe('M')
       expect(store.error).toBeNull()
+    })
+
+    it('camino feliz: crea una categoría de tipo "ingreso" cuando el contexto lo pide (Épica 12)', async () => {
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      const categoriaCreada = {
+        id: 'ci2',
+        usuario_id: 'u1',
+        nombre: 'Freelance',
+        tipo: 'ingreso',
+        predefinida: false,
+        activa: true,
+        creado_en: '',
+      }
+      ;(builder.single as Mock).mockResolvedValueOnce({ data: categoriaCreada, error: null })
+
+      const authStore = useAuthStore()
+      authStore.establecerUsuario({ id: 'u1', email: 'a@a.com' } as never)
+
+      const { crearCategoria } = useCategorias()
+      const exito = await crearCategoria('Freelance', 'ingreso')
+
+      expect(exito).toBe(true)
+      expect(builder.insert).toHaveBeenCalledWith({
+        usuario_id: 'u1',
+        nombre: 'Freelance',
+        tipo: 'ingreso',
+        predefinida: false,
+        activa: true,
+      })
     })
 
     it('borde: nombre duplicado (violación de unicidad Postgres) muestra el mensaje esperado y no crea la categoría', async () => {
@@ -140,7 +173,7 @@ describe('useCategorias', () => {
       store.establecerCategorias([categoriaBase])
 
       const { crearCategoria } = useCategorias()
-      const exito = await crearCategoria('Comida')
+      const exito = await crearCategoria('Comida', 'gasto')
 
       expect(exito).toBe(false)
       expect(store.error).toBe('Ya existe una categoría con ese nombre.')
@@ -153,7 +186,7 @@ describe('useCategorias', () => {
 
       const { crearCategoria } = useCategorias()
       const store = useGastosStore()
-      const exito = await crearCategoria('Mascotas')
+      const exito = await crearCategoria('Mascotas', 'gasto')
 
       expect(exito).toBe(false)
       expect(store.error).toBe('No hay una sesión activa. Vuelve a iniciar sesión.')
@@ -174,7 +207,7 @@ describe('useCategorias', () => {
 
       const { crearCategoria } = useCategorias()
       const store = useGastosStore()
-      const exito = await crearCategoria('Mascotas')
+      const exito = await crearCategoria('Mascotas', 'gasto')
 
       expect(exito).toBe(false)
       expect(store.error).toBe('No se pudo crear la categoría.')

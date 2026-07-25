@@ -49,6 +49,22 @@ export function etiquetaFecha(fecha: string): string {
 }
 
 /**
+ * Formatea un prefijo de mes `YYYY-MM` como "Julio 2026" (mes capitalizado en
+ * español + año), para el selector de mes tipo dropdown de Egresos/Ingresos
+ * (Fase 2 "Caudal"). Mismo criterio que `DashboardView.mesFormateado`: se
+ * formatea solo el mes con `Intl` (en minúscula) y se concatena el año a
+ * mano, porque el formato combinado `{month:'long', year:'numeric'}` de
+ * `Intl` en es-PE inserta un "de" ("julio de 2026") que no calza con el
+ * rótulo deseado.
+ */
+export function formatearMes(mesPrefijo: string): string {
+  const [anio, mes] = mesPrefijo.slice(0, 7).split('-').map(Number)
+  const fecha = new Date(anio, mes - 1, 1)
+  const nombreMes = new Intl.DateTimeFormat('es-PE', { month: 'long' }).format(fecha)
+  return `${nombreMes.charAt(0).toUpperCase()}${nombreMes.slice(1)} ${anio}`
+}
+
+/**
  * Agrupa `items` (ya ordenados, típicamente desc) en bloques consecutivos
  * por día (`obtenerFecha(item).slice(0, 10)`), etiquetando cada grupo con
  * `etiquetaFecha`. NO reordena: si el input no está ordenado por fecha, un

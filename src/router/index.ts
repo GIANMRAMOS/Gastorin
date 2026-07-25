@@ -70,6 +70,23 @@ const router = createRouter({
           name: 'bancos',
           component: () => import('@/views/BancosView.vue'),
         },
+        {
+          // Fase 5 del rediseño "Caudal": sin pantalla propia todavía. Ruta
+          // stub a `ProximamenteView` para que el ítem del nav no sea un
+          // enlace muerto (ver GATE1 de `dev-plan.md`, Fase 1).
+          path: 'graficos',
+          name: 'graficos',
+          component: () => import('@/views/ProximamenteView.vue'),
+          props: { titulo: 'Gráficos' },
+        },
+        {
+          // Fase 6 del rediseño "Caudal": absorberá Categorías/Bancos, sin
+          // pantalla propia todavía. Mismo criterio que `graficos`.
+          path: 'maestros',
+          name: 'maestros',
+          component: () => import('@/views/ProximamenteView.vue'),
+          props: { titulo: 'Maestros' },
+        },
       ],
     },
   ],

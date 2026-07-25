@@ -7,10 +7,20 @@ import type { Moneda } from '@/types/gasto'
  * moneda que su padre gobierna (por ejemplo, el `<select>` oculto de
  * `FormularioGasto.vue`, que sigue siendo la fuente de verdad de a11y y tests).
  */
-const props = defineProps<{
-  modelValue: Moneda | ''
-  disabled?: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    modelValue: Moneda | ''
+    disabled?: boolean
+    /**
+     * Muestra el símbolo de la moneda junto a su código ("S/ PEN"/"$ USD"),
+     * usado por el encabezado "Caudal" (`DashboardView`). Los formularios
+     * (`FormularioGasto`/`FormularioIngreso`) NO pasan esta prop y siguen
+     * mostrando solo "PEN"/"USD".
+     */
+    mostrarSimbolo?: boolean
+  }>(),
+  { mostrarSimbolo: false },
+)
 
 const emit = defineEmits<{
   'update:modelValue': [Moneda]
@@ -32,7 +42,7 @@ function elegir(valor: Moneda) {
       :disabled="disabled"
       @click="elegir('PEN')"
     >
-      PEN
+      {{ mostrarSimbolo ? 'S/ PEN' : 'PEN' }}
     </button>
     <button
       type="button"
@@ -41,7 +51,7 @@ function elegir(valor: Moneda) {
       :disabled="disabled"
       @click="elegir('USD')"
     >
-      USD
+      {{ mostrarSimbolo ? '$ USD' : 'USD' }}
     </button>
   </div>
 </template>

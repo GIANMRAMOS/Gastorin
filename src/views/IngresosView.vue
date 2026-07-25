@@ -3,25 +3,38 @@ import { computed, onMounted, ref } from 'vue'
 import ModalIngreso from '@/components/ModalIngreso.vue'
 import DialogoConfirmacion from '@/components/DialogoConfirmacion.vue'
 import FiltrosIngresos from '@/components/FiltrosIngresos.vue'
+import TarjetaKpi from '@/components/TarjetaKpi.vue'
+import ListaGastoPorCategoria from '@/components/ListaGastoPorCategoria.vue'
+import TablaMovimientos, { type FilaMovimiento } from '@/components/TablaMovimientos.vue'
+import ToggleMoneda from '@/components/ToggleMoneda.vue'
 import { useIngresos } from '@/composables/useIngresos'
+import { useCategorias } from '@/composables/useCategorias'
 import { useBancos } from '@/composables/useBancos'
 import { useIngresosStore } from '@/stores/ingresos'
+import { useGastosStore } from '@/stores/gastos'
 import { useMoneda } from '@/composables/useMoneda'
-import { agruparPorFecha } from '@/composables/useFechas'
+import { formatearMes } from '@/composables/useFechas'
 import type { Ingreso } from '@/types/ingreso'
 import type { Moneda } from '@/types/gasto'
 
 /**
- * Historial de ingresos (Épica 11, HU-11.1–11.4): clon estructural de
- * `HistorialView.vue` reducido a alta, listado, edición y eliminación, más
- * filtros combinables por moneda/banco/mes (sin categoría: `Ingreso` no tiene
- * ese concepto) y el totalizador de la moneda predominante. El orden por
- * fecha descendente lo garantiza el `.order` de `useIngresos.cargarIngresos`.
+ * "Ingresos" (rediseño "Caudal", Fase 2): mismo lenguaje visual que Egresos
+ * (`HistorialView`) — header con subtítulo del mes + toggle de moneda,
+ * filtros (moneda/buscador/categoría/banco/mes), 3 `TarjetaKpi` (Total del
+ * mes / En dólares / Mayor ingreso), `TablaMovimientos` y un sidebar con
+ * "Registrar" + "Por categoría". Reemplaza la lista-de-tarjetas agrupada por
+ * día y el desglose `saldosPorBanco`/"sin banco asignado" de la Fase 1 (ver
+ * "Sugerencias fuera de alcance" del micro-plan: el nuevo diseño no lo
+ * contempla). Cubre además el alta, edición y eliminación de ingresos
+ * (Épica 11) y, desde la migración 008 (Épica 12), la categoría propia de
+ * Ingreso.
  */
 const { cargarIngresos, eliminarIngreso } = useIngresos()
+const { cargarCategorias } = useCategorias()
 const { cargarBancos } = useBancos()
 const storeIngresos = useIngresosStore()
-const { formatearMonto, resumenMonedaPredominante, saldosPorBanco, montoSinBancoPorMoneda } = useMoneda()
+const storeGastos = useGastosStore()
+const { formatearMonto, totalesPorCategoria } = useMoneda()
 
 const modalAbierto = ref(false)
 const ingresoEnEdicion = ref<Ingreso | null>(null)
@@ -29,77 +42,143 @@ const ingresoAEliminar = ref<Ingreso | null>(null)
 
 /** Filtros de UI de Ingresos (estado local de la vista, no del store). */
 const monedaFiltro = ref<'todos' | Moneda>('todos')
+const categoriaFiltro = ref('')
 const bancoFiltro = ref('')
-const mesFiltro = ref('')
+const mesFiltro = ref(mesActualISO())
+const busquedaFiltro = ref('')
+
+/** Moneda que gobierna las 3 stat cards y el sidebar "Por categoría" (independiente de los chips de la fila de filtros, que solo filtran la tabla). */
+const monedaSeleccionada = ref<Moneda>('PEN')
 
 onMounted(() => {
-  cargarIngresos()
+  cargarCategorias()
   cargarBancos()
+  cargarIngresos()
 })
 
-/** Nombre del banco de un ingreso (para mostrarlo en la fila). */
+/** Prefijo `YYYY-MM` del mes actual, en hora LOCAL (nunca `toISOString()`, ver `hoyISO` de `FormularioGasto.vue`). */
+function mesActualISO(): string {
+  const ahora = new Date()
+  const anio = ahora.getFullYear()
+  const mes = String(ahora.getMonth() + 1).padStart(2, '0')
+  return `${anio}-${mes}`
+}
+
+/** Categorías de INGRESO activas (blindaje: `storeGastos.categorias` es una bolsa mixta de ambos tipos desde la migración 008). */
+const categoriasIngreso = computed(() => storeGastos.categorias.filter((c) => c.tipo === 'ingreso'))
+
+/** Nombre del banco de un ingreso (para mostrarlo en la fila de la tabla). */
 function nombreBanco(bancoId: string): string {
   return storeIngresos.bancos.find((banco) => banco.id === bancoId)?.nombre ?? 'Sin banco'
 }
 
-/** Meses (`YYYY-MM`) con al menos un ingreso, únicos y ordenados descendente. */
+/** Nombre de la categoría de un ingreso (para mostrarlo en la fila y en el "por categoría"). */
+function nombreCategoria(categoriaId: string): string {
+  return storeGastos.categorias.find((c) => c.id === categoriaId)?.nombre ?? 'Sin categoría'
+}
+
+/** Meses (`YYYY-MM`) con al menos un ingreso, más el mes actual (para que el selector siempre pueda mostrarlo aunque no tenga movimientos todavía), únicos y ordenados descendente. */
 const mesesDisponibles = computed(() => {
   const meses = new Set(storeIngresos.ingresos.map((ingreso) => ingreso.fecha.slice(0, 7)))
+  meses.add(mesActualISO())
   return [...meses].sort((a, b) => b.localeCompare(a))
-})
-
-/** Ingresos que cumplen la intersección de los 3 filtros activos (moneda, banco, mes). */
-const ingresosFiltrados = computed(() => {
-  return storeIngresos.ingresos.filter((ingreso) => {
-    const cumpleMoneda = monedaFiltro.value === 'todos' || ingreso.moneda === monedaFiltro.value
-    const cumpleBanco = !bancoFiltro.value || ingreso.banco_id === bancoFiltro.value
-    const cumpleMes = !mesFiltro.value || ingreso.fecha.slice(0, 7) === mesFiltro.value
-    return cumpleMoneda && cumpleBanco && cumpleMes
-  })
 })
 
 /** No hay ningún ingreso registrado (estado vacío genérico). */
 const sinIngresos = computed(() => storeIngresos.ingresos.length === 0)
 
-/** Hay ingresos en total, pero el filtro activo no encuentra ninguno. */
-const sinResultadosPorFiltro = computed(
-  () => !sinIngresos.value && ingresosFiltrados.value.length === 0,
-)
-
 /**
- * Ingresos filtrados agrupados por día. `ingresosFiltrados` ya viene
- * ordenado desc (mismo orden de `store.ingresos`), así que el agrupador no
- * reordena.
+ * Ingresos del mes seleccionado (o de TODOS si "mes" = "Todos los meses"),
+ * SIN aplicar el resto de los filtros: base de las 3 stat cards, el
+ * subtítulo del encabezado y el "por categoría".
  */
-const gruposIngresos = computed(() => agruparPorFecha(ingresosFiltrados.value, (ingreso) => ingreso.fecha))
-
-/** Totalizador de la moneda predominante sobre el conjunto ya filtrado. */
-const resumenIngresos = computed(() =>
-  resumenMonedaPredominante(
-    ingresosFiltrados.value.map((ingreso) => ({ moneda: ingreso.moneda, monto: ingreso.importe })),
+const ingresosDelMes = computed(() =>
+  storeIngresos.ingresos.filter(
+    (ingreso) => !mesFiltro.value || ingreso.fecha.slice(0, 7) === mesFiltro.value,
   ),
 )
 
-/** Desglose de saldos por banco (excluye "No especificado") sobre el conjunto ya filtrado. */
-const saldosPorBancoFiltrados = computed(() =>
-  saldosPorBanco(
-    ingresosFiltrados.value.map((ingreso) => ({
-      bancoId: ingreso.banco_id,
-      nombreBanco: nombreBanco(ingreso.banco_id),
-      moneda: ingreso.moneda,
-      monto: ingreso.importe,
-    })),
-  ),
+/** Ingresos del mes que además cumplen moneda/categoría/banco/búsqueda: fuente de la tabla. */
+const ingresosFiltrados = computed(() => {
+  const busqueda = busquedaFiltro.value.trim().toLowerCase()
+  return ingresosDelMes.value.filter((ingreso) => {
+    const cumpleMoneda = monedaFiltro.value === 'todos' || ingreso.moneda === monedaFiltro.value
+    const cumpleCategoria = !categoriaFiltro.value || ingreso.categoria_id === categoriaFiltro.value
+    const cumpleBanco = !bancoFiltro.value || ingreso.banco_id === bancoFiltro.value
+    const cumpleBusqueda = !busqueda || ingreso.concepto.toLowerCase().includes(busqueda)
+    return cumpleMoneda && cumpleCategoria && cumpleBanco && cumpleBusqueda
+  })
+})
+
+/** Hay ingresos en total, pero el filtro activo no encuentra ninguno (estado vacío específico). */
+const sinResultadosPorFiltro = computed(() => !sinIngresos.value && ingresosFiltrados.value.length === 0)
+
+/** Filas ya enriquecidas para `TablaMovimientos`. */
+const filasTabla = computed<FilaMovimiento[]>(() =>
+  ingresosFiltrados.value.map((ingreso) => ({
+    id: ingreso.id,
+    fecha: ingreso.fecha,
+    descripcion: ingreso.concepto,
+    nombreCategoria: nombreCategoria(ingreso.categoria_id),
+    nombreBanco: nombreBanco(ingreso.banco_id),
+    monto: ingreso.importe,
+    moneda: ingreso.moneda,
+  })),
 )
 
-/** Monto total sin banco asignado ("No especificado"), por moneda, sobre el conjunto ya filtrado. */
-const montoSinBanco = computed(() =>
-  montoSinBancoPorMoneda(
-    ingresosFiltrados.value.map((ingreso) => ({
-      nombreBanco: nombreBanco(ingreso.banco_id),
+/** Total del mes en PEN (para el subtítulo del encabezado, independiente de la moneda seleccionada). */
+const totalPenDelMes = computed(() =>
+  ingresosDelMes.value.filter((i) => i.moneda === 'PEN').reduce((total, i) => total + i.importe, 0),
+)
+/** Total del mes en USD (para el subtítulo del encabezado y para la 2ª stat card "En dólares"). */
+const totalUsdDelMes = computed(() =>
+  ingresosDelMes.value.filter((i) => i.moneda === 'USD').reduce((total, i) => total + i.importe, 0),
+)
+
+/** "S/ X + $ Y" (omite una moneda si su total es 0; si ambas son 0, muestra "S/ 0.00"). */
+const textoTotalesDelMes = computed(() => {
+  const partes: string[] = []
+  if (totalPenDelMes.value > 0) partes.push(formatearMonto(totalPenDelMes.value, 'PEN'))
+  if (totalUsdDelMes.value > 0) partes.push(formatearMonto(totalUsdDelMes.value, 'USD'))
+  return partes.length > 0 ? partes.join(' + ') : formatearMonto(0, 'PEN')
+})
+
+/** Subtítulo del encabezado: "N movimientos en {Mes} {Año} · S/ X + $ Y". */
+const subtituloEncabezado = computed(() => {
+  const etiquetaMes = mesFiltro.value ? formatearMes(mesFiltro.value) : 'todos los períodos'
+  return `${ingresosDelMes.value.length} movimientos en ${etiquetaMes} · ${textoTotalesDelMes.value}`
+})
+
+/** Ingresos del mes en la moneda del toggle del encabezado (base de "Total del mes" y "Mayor ingreso"). */
+const ingresosDelMesEnMonedaSeleccionada = computed(() =>
+  ingresosDelMes.value.filter((ingreso) => ingreso.moneda === monedaSeleccionada.value),
+)
+
+/** Total del mes en la moneda seleccionada (1ª stat card). */
+const totalDelMes = computed(() =>
+  ingresosDelMesEnMonedaSeleccionada.value.reduce((total, i) => total + i.importe, 0),
+)
+
+/** Ingreso de mayor monto del mes en la moneda seleccionada, o `null` si no hay ninguno (3ª stat card). */
+const mayorIngreso = computed<Ingreso | null>(() =>
+  ingresosDelMesEnMonedaSeleccionada.value.reduce<Ingreso | null>(
+    (mayor, ingreso) => (mayor === null || ingreso.importe > mayor.importe ? ingreso : mayor),
+    null,
+  ),
+)
+const montoMayorIngreso = computed(() => mayorIngreso.value?.importe ?? 0)
+const subtituloMayorIngreso = computed(() => mayorIngreso.value?.concepto)
+
+/** "Por categoría" del sidebar: totales del mes por categoría, en la moneda seleccionada, sin excluir ninguna categoría. */
+const porCategoria = computed(() =>
+  totalesPorCategoria(
+    ingresosDelMes.value.map((ingreso) => ({
+      categoria_id: ingreso.categoria_id,
+      nombre: nombreCategoria(ingreso.categoria_id),
       moneda: ingreso.moneda,
       monto: ingreso.importe,
     })),
+    monedaSeleccionada.value,
   ),
 )
 
@@ -113,6 +192,12 @@ function abrirModalAlta() {
 function abrirModalEdicion(ingreso: Ingreso) {
   ingresoEnEdicion.value = ingreso
   modalAbierto.value = true
+}
+
+/** Resuelve el id emitido por `TablaMovimientos` al ingreso real antes de abrir el modal de edición. */
+function abrirModalEdicionPorId(id: string) {
+  const ingreso = storeIngresos.ingresos.find((i) => i.id === id)
+  if (ingreso) abrirModalEdicion(ingreso)
 }
 
 /** Cierra el modal de alta/edición sin guardar. */
@@ -131,6 +216,12 @@ function pedirConfirmacionEliminar(ingreso: Ingreso) {
   ingresoAEliminar.value = ingreso
 }
 
+/** Resuelve el id emitido por `TablaMovimientos` al ingreso real antes de pedir confirmación. */
+function pedirConfirmacionEliminarPorId(id: string) {
+  const ingreso = storeIngresos.ingresos.find((i) => i.id === id)
+  if (ingreso) pedirConfirmacionEliminar(ingreso)
+}
+
 /** Cancela la eliminación: no se borra nada. */
 function cancelarEliminacion() {
   ingresoAEliminar.value = null
@@ -146,86 +237,80 @@ async function confirmarEliminacion() {
 
 <template>
   <main class="pagina-ingresos">
-    <div class="cabecera-ingresos">
-      <h1>Ingresos</h1>
-      <button type="button" class="boton-primario boton-nuevo" @click="abrirModalAlta">
-        + Nuevo ingreso
-      </button>
-    </div>
+    <header class="encabezado-ingresos">
+      <div class="titulo-encabezado">
+        <h1>Ingresos</h1>
+        <p class="subtitulo-encabezado">{{ subtituloEncabezado }}</p>
+      </div>
+      <div class="acciones-encabezado">
+        <ToggleMoneda v-model="monedaSeleccionada" mostrar-simbolo />
+        <button type="button" class="boton-registrar boton-nuevo" @click="abrirModalAlta">
+          + Nuevo ingreso
+        </button>
+      </div>
+    </header>
 
     <p v-if="storeIngresos.error" role="alert" class="mensaje-error">{{ storeIngresos.error }}</p>
 
     <FiltrosIngresos
       v-if="!sinIngresos"
       v-model:moneda="monedaFiltro"
+      v-model:categoria-id="categoriaFiltro"
       v-model:banco-id="bancoFiltro"
       v-model:mes="mesFiltro"
+      v-model:busqueda="busquedaFiltro"
+      :categorias="categoriasIngreso"
       :bancos="storeIngresos.bancos"
       :meses-disponibles="mesesDisponibles"
     />
 
-    <p v-if="resumenIngresos" class="resumen-totalizador">
-      Total {{ formatearMonto(resumenIngresos.total, resumenIngresos.moneda) }}
-    </p>
-
-    <ul v-if="saldosPorBancoFiltrados.length > 0" class="desglose-bancos">
-      <li v-for="banco in saldosPorBancoFiltrados" :key="banco.bancoId" class="item-desglose-banco">
-        <span class="nombre-desglose-banco">{{ banco.nombreBanco }}</span>
-        <span
-          v-for="[moneda, monto] in Object.entries(banco.montosPorMoneda)"
-          :key="`${banco.bancoId}-${moneda}`"
-          class="monto-desglose-banco"
-        >
-          {{ formatearMonto(monto, moneda as Moneda) }}
-        </span>
-      </li>
-    </ul>
-
-    <template v-if="Object.keys(montoSinBanco).length > 0">
-      <p
-        v-for="[moneda, monto] in Object.entries(montoSinBanco)"
-        :key="`sin-banco-${moneda}`"
-        class="nota-sin-banco"
-      >
-        Incluye {{ formatearMonto(monto, moneda as Moneda) }} sin banco asignado
-      </p>
-    </template>
-
-    <div v-if="ingresosFiltrados.length > 0" class="grupos-ingresos">
-      <div v-for="grupo in gruposIngresos" :key="grupo.etiqueta + grupo.items[0].id" class="grupo-fecha">
-        <h2 class="encabezado-grupo-fecha">{{ grupo.etiqueta }}</h2>
-        <ul class="lista-ingresos">
-          <li v-for="ingreso in grupo.items" :key="ingreso.id" class="fila-ingreso">
-            <div class="detalle-ingreso">
-              <p class="concepto-ingreso">{{ ingreso.concepto }}</p>
-              <p class="metadatos-ingreso">{{ nombreBanco(ingreso.banco_id) }} · {{ ingreso.fecha }}</p>
-            </div>
-            <p class="importe-ingreso">{{ formatearMonto(ingreso.importe, ingreso.moneda) }}</p>
-
-            <div class="acciones-ingreso">
-              <button type="button" class="enlace-secundario indicador-editar" @click="abrirModalEdicion(ingreso)">
-                Editar ›
-              </button>
-              <button type="button" class="enlace-secundario" @click="pedirConfirmacionEliminar(ingreso)">
-                Eliminar
-              </button>
-            </div>
-          </li>
-        </ul>
-      </div>
+    <div v-if="!sinIngresos" class="fila-kpis">
+      <TarjetaKpi label="Total del mes" :monto="totalDelMes" :moneda="monedaSeleccionada" variante="ingreso" />
+      <TarjetaKpi label="En dólares" :monto="totalUsdDelMes" moneda="USD" variante="ingreso" />
+      <TarjetaKpi
+        label="Mayor ingreso"
+        :monto="montoMayorIngreso"
+        :moneda="monedaSeleccionada"
+        variante="ingreso"
+        :subtitulo="subtituloMayorIngreso"
+      />
     </div>
 
-    <div v-else-if="sinIngresos" class="estado-vacio estado-vacio-generico">
+    <div v-if="!sinIngresos" class="grid-ingresos">
+      <section class="columna-tabla">
+        <TablaMovimientos
+          v-if="ingresosFiltrados.length > 0"
+          :filas="filasTabla"
+          :total-sin-filtrar="ingresosDelMes.length"
+          @editar="abrirModalEdicionPorId"
+          @eliminar="pedirConfirmacionEliminarPorId"
+        />
+        <div v-else-if="sinResultadosPorFiltro" class="estado-vacio estado-vacio-filtro">
+          <span class="icono-vacio-filtro" aria-hidden="true">🔍</span>
+          <p class="mensaje-vacio">Sin ingresos con este filtro</p>
+          <p class="sugerencia-vacio">Prueba cambiar el filtro o registra el primer ingreso del mes.</p>
+        </div>
+      </section>
+
+      <aside class="columna-lateral-ingresos">
+        <div class="tarjeta-lateral tarjeta-registrar">
+          <h2>Registrar un ingreso</h2>
+          <button type="button" class="boton-primario boton-nuevo" @click="abrirModalAlta">
+            + Nuevo ingreso
+          </button>
+        </div>
+        <div class="tarjeta-lateral">
+          <h2>Por categoría</h2>
+          <ListaGastoPorCategoria :items="porCategoria" :moneda="monedaSeleccionada" />
+        </div>
+      </aside>
+    </div>
+
+    <div v-else class="estado-vacio estado-vacio-generico">
       <p class="mensaje-vacio">Todavía no hay ingresos registrados.</p>
       <button type="button" class="boton-primario boton-nuevo" @click="abrirModalAlta">
         Nuevo ingreso
       </button>
-    </div>
-
-    <div v-else-if="sinResultadosPorFiltro" class="estado-vacio estado-vacio-filtro">
-      <span class="icono-vacio-filtro" aria-hidden="true">🔍</span>
-      <p class="mensaje-vacio">Sin ingresos con este filtro</p>
-      <p class="sugerencia-vacio">Prueba cambiar el filtro o registra el primer ingreso del mes.</p>
     </div>
 
     <ModalIngreso
@@ -246,103 +331,100 @@ async function confirmarEliminacion() {
 
 <style scoped>
 .pagina-ingresos {
-  max-width: 720px;
+  max-width: 1080px;
   margin: 0 auto;
   padding: var(--espacio-6) var(--espacio-4);
 }
 
-.cabecera-ingresos {
+.encabezado-ingresos {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: var(--espacio-4);
   margin-bottom: var(--espacio-6);
+  flex-wrap: wrap;
 }
 
-.cabecera-ingresos h1 {
-  font-size: clamp(20px, 4vw, 26px);
+.titulo-encabezado h1 {
   margin: 0;
+  font-weight: 600;
+  font-size: 21px;
+  letter-spacing: -0.02em;
 }
 
-.boton-nuevo {
-  width: auto;
-  min-height: 44px;
-  margin-top: 0;
-  padding: 0 var(--espacio-4);
+.subtitulo-encabezado {
+  margin: var(--espacio-1) 0 0;
+  font-weight: 400;
+  font-size: 12.5px;
+  color: rgba(0, 0, 0, 0.5);
 }
 
-.grupos-ingresos {
-  display: flex;
-  flex-direction: column;
-  gap: var(--espacio-4);
-}
-
-.encabezado-grupo-fecha {
-  margin: 0 0 var(--espacio-2);
-  font-size: var(--tamano-pequeno);
-  font-weight: 700;
-  color: var(--color-texto-secundario);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-}
-
-.lista-ingresos {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--espacio-2);
-}
-
-.fila-ingreso {
+.acciones-encabezado {
   display: flex;
   align-items: center;
   gap: var(--espacio-3);
-  background: var(--color-fondo);
-  border: 1px solid var(--color-borde-tarjeta);
-  border-radius: 18px;
-  padding: var(--espacio-3) var(--espacio-4);
+  flex-shrink: 0;
 }
 
-.detalle-ingreso {
-  flex: 1;
+.boton-registrar {
+  min-height: 40px;
+  padding: 0 var(--espacio-4);
+  background: #1a1a18;
+  color: #fff;
+  border: none;
+  border-radius: 9px;
+  font-weight: 600;
+  font-size: var(--tamano-pequeno);
+  cursor: pointer;
+  font-family: var(--fuente-base);
+  margin-top: 0;
+}
+.boton-registrar:hover {
+  background: var(--color-primario-hover);
+}
+
+.fila-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-bottom: var(--espacio-4);
+}
+
+.grid-ingresos {
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.columna-tabla {
+  background: var(--color-fondo);
+  border: 1px solid var(--color-borde-tarjeta);
+  border-radius: var(--radio-tarjeta);
+  padding: var(--espacio-4);
   min-width: 0;
 }
 
-.concepto-ingreso {
-  margin: 0;
-  font-weight: 700;
-  color: var(--color-texto);
-}
-
-.metadatos-ingreso {
-  margin: 2px 0 0;
-  font-size: var(--tamano-pequeno);
-  color: var(--color-texto-secundario);
-}
-
-.importe-ingreso {
-  margin: 0;
-  font-weight: 700;
-  color: var(--color-texto);
-  white-space: nowrap;
-}
-
-.acciones-ingreso {
+.columna-lateral-ingresos {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+  gap: 16px;
 }
 
-.acciones-ingreso button {
-  margin-top: 0;
-  padding: 0;
+.tarjeta-lateral {
+  background: var(--color-fondo);
+  border: 1px solid var(--color-borde-tarjeta);
+  border-radius: var(--radio-tarjeta);
+  padding: var(--espacio-4);
 }
 
-.indicador-editar {
-  font-weight: 600;
+.tarjeta-lateral h2 {
+  margin: 0 0 var(--espacio-4);
+  font-size: 1rem;
+}
+
+.tarjeta-registrar .boton-nuevo {
+  width: 100%;
 }
 
 .estado-vacio {
@@ -367,41 +449,13 @@ async function confirmarEliminacion() {
   margin: 0;
 }
 
-.resumen-totalizador {
-  margin: 0 0 var(--espacio-3);
-  font-weight: 700;
-  color: var(--color-texto);
-}
+@media (max-width: 900px) {
+  .fila-kpis {
+    grid-template-columns: 1fr;
+  }
 
-.desglose-bancos {
-  list-style: none;
-  margin: 0 0 var(--espacio-4);
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--espacio-1);
-}
-
-.item-desglose-banco {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--espacio-3);
-  font-size: var(--tamano-pequeno);
-  color: var(--color-texto-secundario);
-}
-
-.nombre-desglose-banco {
-  font-weight: 600;
-}
-
-.monto-desglose-banco {
-  white-space: nowrap;
-}
-
-.nota-sin-banco {
-  margin: 0 0 var(--espacio-3);
-  font-size: var(--tamano-pequeno);
-  color: var(--color-texto-terciario);
+  .grid-ingresos {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

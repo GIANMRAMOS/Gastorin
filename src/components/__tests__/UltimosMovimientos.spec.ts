@@ -11,6 +11,10 @@ function movimientoDe(datos: Partial<MovimientoUnificado>): MovimientoUnificado 
     descripcion: 'Almuerzo',
     moneda: 'PEN',
     id: `m-${Math.random()}`,
+    // Campos aditivos de la Fase 0 "Caudal" (no usados por este componente,
+    // pero exigidos por el tipo `MovimientoUnificado`).
+    categoriaId: 'c1',
+    bancoId: 'b1',
     ...datos,
   }
 }

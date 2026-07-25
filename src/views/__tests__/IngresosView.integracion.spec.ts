@@ -1,57 +1,95 @@
-import { beforeEach, describe, expect, it, type Mock } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import IngresosView from '@/views/IngresosView.vue'
 import { supabase } from '@/lib/supabaseClient'
 import { crearConstructorConsulta } from '@/lib/__mocks__/supabaseClient'
+import type { Categoria } from '@/types/gasto'
 import type { Banco, Ingreso } from '@/types/ingreso'
 
 const fromMock = supabase.from as unknown as Mock
 
 /**
- * Pruebas de integración de `IngresosView` para el nuevo filtro combinable
- * (moneda/banco/mes) y el totalizador de moneda predominante. Espejo de
- * `HistorialView.integracion.spec.ts`, sin categoría (Ingresos no tiene ese
- * concepto en el modelo de datos, ver `types/ingreso.ts`). No repite lo que
- * ya cubren `FiltrosIngresos.spec.ts` (emisión aislada del presentacional)
- * ni `IngresosView.spec.ts` (CRUD).
+ * Pruebas de integración de `IngresosView` (rediseño "Caudal", Fase 2:
+ * `TablaMovimientos` + 3 `TarjetaKpi` + sidebar "Por categoría", en vez de la
+ * lista-de-tarjetas agrupada por día y el desglose `saldosPorBanco`/"sin
+ * banco asignado" de la Fase 1 — ver "Sugerencias fuera de alcance" del
+ * micro-plan). Espejo de `HistorialView.integracion.spec.ts`, con categoría
+ * propia de Ingreso (Épica 12, migración 008) en vez de "sin ese concepto".
+ * No repite lo que ya cubren `FiltrosIngresos.spec.ts` (emisión aislada),
+ * `TablaMovimientos.spec.ts` (presentacional) ni `useMoneda.spec.ts`
+ * (`totalesPorCategoria` puro).
  */
+const categoriaSueldo: Categoria = {
+  id: 'ci1',
+  usuario_id: 'u1',
+  nombre: 'Sueldo',
+  tipo: 'ingreso',
+  predefinida: true,
+  activa: true,
+  creado_en: '',
+  abreviatura: 'S',
+}
+const categoriaFreelance: Categoria = {
+  id: 'ci2',
+  usuario_id: 'u1',
+  nombre: 'Freelance',
+  tipo: 'ingreso',
+  predefinida: false,
+  activa: true,
+  creado_en: '',
+  abreviatura: 'F',
+}
+const categoriaGastoComida: Categoria = {
+  id: 'c1',
+  usuario_id: 'u1',
+  nombre: 'Comida',
+  tipo: 'gasto',
+  predefinida: true,
+  activa: true,
+  creado_en: '',
+  abreviatura: 'C',
+}
+const categoriasFalsas: Categoria[] = [categoriaSueldo, categoriaFreelance, categoriaGastoComida]
+
 const bancoBcp: Banco = { id: 'b1', usuario_id: 'u1', nombre: 'BCP', created_at: '' }
 const bancoInterbank: Banco = { id: 'b2', usuario_id: 'u1', nombre: 'Interbank', created_at: '' }
 const bancosFalsos = [bancoBcp, bancoInterbank]
 
-const ingresosFalsos: Ingreso[] = [
-  {
-    id: 'i1',
-    usuario_id: 'u1',
-    banco_id: 'b1',
-    fecha: '2026-07-10',
-    moneda: 'PEN',
-    importe: 100,
-    concepto: 'Sueldo',
-    created_at: '',
-  },
-  {
-    id: 'i2',
-    usuario_id: 'u1',
-    banco_id: 'b2',
-    fecha: '2026-07-15',
-    moneda: 'USD',
-    importe: 20,
-    concepto: 'Freelance',
-    created_at: '',
-  },
-  {
-    id: 'i3',
-    usuario_id: 'u1',
-    banco_id: 'b1',
-    fecha: '2026-06-01',
-    moneda: 'PEN',
-    importe: 30,
-    concepto: 'Reembolso',
-    created_at: '',
-  },
-]
+const ingresoSueldo: Ingreso = {
+  id: 'i1',
+  usuario_id: 'u1',
+  banco_id: 'b1',
+  categoria_id: 'ci1',
+  fecha: '2026-07-10',
+  moneda: 'PEN',
+  importe: 100,
+  concepto: 'Sueldo',
+  created_at: '',
+}
+const ingresoFreelance: Ingreso = {
+  id: 'i2',
+  usuario_id: 'u1',
+  banco_id: 'b2',
+  categoria_id: 'ci2',
+  fecha: '2026-07-15',
+  moneda: 'USD',
+  importe: 20,
+  concepto: 'Freelance',
+  created_at: '',
+}
+const ingresoReembolso: Ingreso = {
+  id: 'i3',
+  usuario_id: 'u1',
+  banco_id: 'b1',
+  categoria_id: 'ci1',
+  fecha: '2026-06-01',
+  moneda: 'PEN',
+  importe: 30,
+  concepto: 'Reembolso',
+  created_at: '',
+}
+const ingresosFalsos: Ingreso[] = [ingresoSueldo, ingresoFreelance, ingresoReembolso]
 
 function flushPromises() {
   return new Promise((resolve) => setTimeout(resolve, 0))
@@ -59,105 +97,118 @@ function flushPromises() {
 
 /** Configura `supabase.from()` para devolver los fixtures dados en `onMounted`. */
 function mockearCargaInicial(
-  opciones: { ingresos?: Ingreso[]; bancos?: Banco[] } = {},
+  opciones: { categorias?: Categoria[]; bancos?: Banco[]; ingresos?: Ingreso[] } = {},
 ) {
-  const { ingresos = ingresosFalsos, bancos = bancosFalsos } = opciones
+  const { categorias = categoriasFalsas, bancos = bancosFalsos, ingresos = ingresosFalsos } = opciones
   fromMock.mockImplementation((tabla: string) => {
     const builder = crearConstructorConsulta()
     if (tabla === 'ingresos') {
       ;(builder.order as Mock).mockResolvedValue({ data: ingresos, error: null })
-    } else {
+    } else if (tabla === 'bancos') {
       ;(builder.order as Mock).mockResolvedValue({ data: bancos, error: null })
+    } else {
+      ;(builder.order as Mock).mockResolvedValue({ data: categorias, error: null })
     }
     return builder
   })
 }
 
-describe('IngresosView — filtros combinables', () => {
+describe('IngresosView — tabla, filtros y stat cards (rediseño "Caudal", Fase 2)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 6, 15)) // 15 jul 2026: "mes actual" = Julio 2026
     mockearCargaInicial()
   })
 
-  it('filtro por chip de moneda: "S/ Soles" deja solo ingresos en PEN y marca el chip activo', async () => {
-    const wrapper = mount(IngresosView)
-    await flushPromises()
-
-    const chipSoles = wrapper.findAll('.chip-moneda').find((c) => c.text() === 'S/ Soles')!
-    await chipSoles.trigger('click')
-
-    expect(wrapper.findAll('.fila-ingreso')).toHaveLength(2) // Sueldo y Reembolso (PEN)
-    expect(wrapper.text()).toContain('Sueldo')
-    expect(wrapper.text()).toContain('Reembolso')
-    expect(wrapper.text()).not.toContain('Freelance') // Freelance es USD
-
-    expect(chipSoles.classes()).toContain('activo')
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
-  it('"Todos" restaura el listado completo tras haber activado "S/ Soles"', async () => {
+  it('camino feliz: el selector de mes arranca en el mes actual y la tabla solo lista los movimientos de ese mes', async () => {
     const wrapper = mount(IngresosView)
     await flushPromises()
 
-    await wrapper.findAll('.chip-moneda').find((c) => c.text() === 'S/ Soles')!.trigger('click')
-    expect(wrapper.findAll('.fila-ingreso')).toHaveLength(2)
+    const select = wrapper.find('select[aria-label="Filtrar por mes"]')
+    expect((select.element as HTMLSelectElement).value).toBe('2026-07')
 
-    await wrapper.findAll('.chip-moneda').find((c) => c.text() === 'Todos')!.trigger('click')
-    expect(wrapper.findAll('.fila-ingreso')).toHaveLength(3)
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(2) // Sueldo y Freelance (julio); Reembolso (junio) queda fuera por defecto
+    expect(wrapper.text()).toContain('Sueldo')
+    expect(wrapper.text()).toContain('Freelance')
+    expect(wrapper.text()).not.toContain('Reembolso')
+  })
+
+  it('elegir "Todos los meses" muestra los 3 ingresos', async () => {
+    const wrapper = mount(IngresosView)
+    await flushPromises()
+
+    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('')
+
+    expect(wrapper.findAll('tbody tr')).toHaveLength(3)
+    expect(wrapper.text()).toContain('Reembolso')
   })
 
   it('filtro por banco: elegir "Interbank" deja solo sus ingresos', async () => {
     const wrapper = mount(IngresosView)
     await flushPromises()
 
-    const select = wrapper.find('select[aria-label="Filtrar por banco"]')
-    await select.setValue('b2')
+    await wrapper.find('select[aria-label="Filtrar por banco"]').setValue('b2')
 
-    expect(wrapper.findAll('.fila-ingreso')).toHaveLength(1)
-    expect(wrapper.text()).toContain('Freelance')
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(1)
+    expect(filas[0].text()).toContain('Freelance')
   })
 
-  it('filtro por mes: elegir "2026-06" deja solo los ingresos de ese mes; los meses salen del store', async () => {
+  it('filtro por categoría: elegir "Sueldo" deja solo los ingresos de esa categoría (julio: solo el propio "Sueldo")', async () => {
     const wrapper = mount(IngresosView)
     await flushPromises()
 
-    const select = wrapper.find('select[aria-label="Filtrar por mes"]')
-    const opciones = select.findAll('option').map((o) => o.text())
-    expect(opciones).toContain('2026-07')
-    expect(opciones).toContain('2026-06')
+    await wrapper.find('select[aria-label="Filtrar por categoría"]').setValue('ci1')
 
-    await select.setValue('2026-06')
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(1)
+    expect(filas[0].text()).toContain('Sueldo')
+  })
 
-    expect(wrapper.findAll('.fila-ingreso')).toHaveLength(1)
-    expect(wrapper.text()).toContain('Reembolso')
+  it('buscador de texto libre: escribir "free" deja solo "Freelance" (case-insensitive)', async () => {
+    const wrapper = mount(IngresosView)
+    await flushPromises()
+
+    await wrapper.find('input[aria-label="Buscar por concepto"]').setValue('FREE')
+
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(1)
+    expect(filas[0].text()).toContain('Freelance')
   })
 
   it('filtros combinables: moneda + banco + mes aplican la intersección de los tres', async () => {
     const wrapper = mount(IngresosView)
     await flushPromises()
 
+    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('')
     await wrapper.findAll('.chip-moneda').find((c) => c.text() === 'S/ Soles')!.trigger('click')
     await wrapper.find('select[aria-label="Filtrar por banco"]').setValue('b1')
-    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('2026-07')
 
-    // Solo "Sueldo" (PEN, banco BCP, julio 2026) cumple las tres condiciones.
-    expect(wrapper.findAll('.fila-ingreso')).toHaveLength(1)
-    expect(wrapper.text()).toContain('Sueldo')
+    // "Sueldo" y "Reembolso" son PEN + banco BCP; sin el filtro de mes, ambos cumplen.
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(2)
+    const textoFilas = filas.map((f) => f.text()).join(' ')
+    expect(textoFilas).toContain('Sueldo')
+    expect(textoFilas).toContain('Reembolso')
+    expect(textoFilas).not.toContain('Freelance')
   })
 
-  it('la vista de Ingresos NO tiene select de categoría (no existe ese concepto en el modelo)', async () => {
+  it('blindaje Fase 2 "Caudal" (GATE 1): el select de categoría solo ofrece categorías de tipo "ingreso", nunca "Comida" (gasto)', async () => {
     const wrapper = mount(IngresosView)
     await flushPromises()
 
-    expect(wrapper.find('select[aria-label="Filtrar por categoría"]').exists()).toBe(false)
-  })
-})
-
-describe('IngresosView — doble estado vacío', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
+    const opciones = wrapper.findAll('select[aria-label="Filtrar por categoría"] option')
+    expect(opciones.map((o) => o.text())).not.toContain('Comida')
+    expect(opciones.map((o) => o.text())).toContain('Sueldo')
   })
 
-  it('sin ningún ingreso en absoluto: estado vacío genérico y sin componente de filtros', async () => {
+  it('estado vacío genérico: sin ningún ingreso, se muestra el mensaje genérico con CTA "Nuevo ingreso" y no se muestran filtros', async () => {
     mockearCargaInicial({ ingresos: [] })
     const wrapper = mount(IngresosView)
     await flushPromises()
@@ -167,186 +218,80 @@ describe('IngresosView — doble estado vacío', () => {
     expect(wrapper.findComponent({ name: 'FiltrosIngresos' }).exists()).toBe(false)
   })
 
-  it('hay ingresos pero el filtro no encuentra ninguno: estado vacío específico, no el genérico', async () => {
-    mockearCargaInicial()
+  it('estado vacío por filtro: hay ingresos en total, pero el filtro activo no encuentra ninguno', async () => {
     const wrapper = mount(IngresosView)
     await flushPromises()
 
-    // "Freelance" (USD, banco Interbank) combinado con moneda "S/ Soles": ninguna fila cumple ambas.
+    // Julio (mes por defecto) + banco Interbank + moneda "S/ Soles": Freelance es USD, ninguna fila cumple ambas.
     await wrapper.findAll('.chip-moneda').find((c) => c.text() === 'S/ Soles')!.trigger('click')
     await wrapper.find('select[aria-label="Filtrar por banco"]').setValue('b2')
 
-    expect(wrapper.findAll('.fila-ingreso')).toHaveLength(0)
+    expect(wrapper.findAll('tbody tr')).toHaveLength(0)
     expect(wrapper.find('.estado-vacio-filtro').exists()).toBe(true)
     expect(wrapper.find('.estado-vacio-generico').exists()).toBe(false)
     expect(wrapper.text()).toContain('Sin ingresos con este filtro')
   })
-})
 
-describe('IngresosView — totalizador de moneda predominante', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    mockearCargaInicial()
-  })
-
-  it('sin filtro (mezcla con mayoría PEN): el totalizador muestra el total en PEN de los PEN visibles', async () => {
+  it('subtítulo del encabezado: "N movimientos en Julio 2026 · S/ X + $ Y"', async () => {
     const wrapper = mount(IngresosView)
     await flushPromises()
 
-    // 2 PEN (100 + 30 = 130) y 1 USD → predomina PEN.
-    expect(wrapper.find('.resumen-totalizador').text()).toContain('S/')
-    expect(wrapper.find('.resumen-totalizador').text()).toContain('130.00')
+    const subtitulo = wrapper.find('.subtitulo-encabezado').text()
+    expect(subtitulo).toContain('2 movimientos en Julio 2026')
+    expect(subtitulo).toContain('100.00')
+    expect(subtitulo).toContain('20.00')
   })
 
-  it('filtro moneda USD: el totalizador muestra el total en USD del subconjunto filtrado', async () => {
+  it('3 stat cards (moneda PEN, mes actual): Total del mes y Mayor ingreso reflejan solo a "Sueldo" (el único ingreso PEN de julio)', async () => {
     const wrapper = mount(IngresosView)
     await flushPromises()
 
-    await wrapper.findAll('.chip-moneda').find((c) => c.text() === '$ Dólares')!.trigger('click')
+    const kpis = wrapper.findAllComponents({ name: 'TarjetaKpi' })
+    expect(kpis).toHaveLength(3)
 
-    expect(wrapper.find('.resumen-totalizador').text()).toContain('$')
-    expect(wrapper.find('.resumen-totalizador').text()).toContain('20.00')
+    const total = kpis.find((k) => k.props('label') === 'Total del mes')!
+    const mayor = kpis.find((k) => k.props('label') === 'Mayor ingreso')!
+
+    expect(total.props('monto')).toBe(100)
+    expect(mayor.props('monto')).toBe(100)
+    expect(mayor.props('subtitulo')).toBe('Sueldo')
   })
 
-  it('conjunto filtrado vacío: el totalizador no se renderiza (aparece el estado vacío por filtro en su lugar)', async () => {
+  it('"En dólares" siempre refleja el total USD del mes, independiente de la moneda seleccionada en el toggle', async () => {
     const wrapper = mount(IngresosView)
     await flushPromises()
 
-    await wrapper.findAll('.chip-moneda').find((c) => c.text() === 'S/ Soles')!.trigger('click')
-    await wrapper.find('select[aria-label="Filtrar por banco"]').setValue('b2')
+    const kpis = wrapper.findAllComponents({ name: 'TarjetaKpi' })
+    const enDolares = kpis.find((k) => k.props('label') === 'En dólares')!
+    expect(enDolares.props('monto')).toBe(20)
+    expect(enDolares.props('moneda')).toBe('USD')
 
-    expect(wrapper.find('.resumen-totalizador').exists()).toBe(false)
-    expect(wrapper.find('.estado-vacio-filtro').exists()).toBe(true)
+    await wrapper.findComponent({ name: 'ToggleMoneda' }).vm.$emit('update:modelValue', 'USD')
+    await wrapper.vm.$nextTick()
+
+    const kpisTrasCambio = wrapper.findAllComponents({ name: 'TarjetaKpi' })
+    expect(kpisTrasCambio.find((k) => k.props('label') === 'En dólares')!.props('monto')).toBe(20)
   })
 
-  it('el total se recalcula al cambiar el filtro', async () => {
+  it('"Por categoría" (moneda PEN, mes actual): solo "Sueldo" aparece, con su total', async () => {
     const wrapper = mount(IngresosView)
     await flushPromises()
 
-    const totalInicial = wrapper.find('.resumen-totalizador').text()
+    const lista = wrapper.findComponent({ name: 'ListaGastoPorCategoria' })
+    expect(lista.props('items')).toEqual([{ categoria_id: 'ci1', nombre: 'Sueldo', total: 100 }])
+  })
 
+  it('borde: 0 movimientos en la moneda seleccionada no produce NaN en "Mayor ingreso"', async () => {
+    const wrapper = mount(IngresosView)
+    await flushPromises()
+
+    // Junio solo tiene "Reembolso" (PEN); cambiar el toggle del encabezado a USD deja 0 movimientos ese mes.
     await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('2026-06')
+    await wrapper.findComponent({ name: 'ToggleMoneda' }).vm.$emit('update:modelValue', 'USD')
+    await wrapper.vm.$nextTick()
 
-    const totalTrasFiltrar = wrapper.find('.resumen-totalizador').text()
-    expect(totalTrasFiltrar).not.toBe(totalInicial)
-    expect(totalTrasFiltrar).toContain('30.00')
-  })
-})
-
-describe('IngresosView — desglose de saldos por banco', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    mockearCargaInicial()
-  })
-
-  it('camino feliz: sin filtro, lista los dos bancos con sus montos por moneda', async () => {
-    const wrapper = mount(IngresosView)
-    await flushPromises()
-
-    const items = wrapper.findAll('.item-desglose-banco')
-    expect(items).toHaveLength(2)
-
-    const bcp = items.find((item) => item.text().includes('BCP'))!
-    expect(bcp.text()).toContain('S/')
-    expect(bcp.text()).toContain('130.00') // 100 (Sueldo) + 30 (Reembolso), ambos PEN
-
-    const interbank = items.find((item) => item.text().includes('Interbank'))!
-    expect(interbank.text()).toContain('$')
-    expect(interbank.text()).toContain('20.00')
-  })
-
-  it('filtro por moneda USD: cada banco muestra solo su monto USD, desaparecen las claves PEN', async () => {
-    const wrapper = mount(IngresosView)
-    await flushPromises()
-
-    await wrapper.findAll('.chip-moneda').find((c) => c.text() === '$ Dólares')!.trigger('click')
-
-    const items = wrapper.findAll('.item-desglose-banco')
-    expect(items).toHaveLength(1)
-    expect(items[0].text()).toContain('Interbank')
-    expect(items[0].text()).toContain('$')
-    expect(items[0].text()).not.toContain('S/')
-  })
-
-  it('filtro por banco: seleccionar un banco concreto deja el desglose con esa única entrada', async () => {
-    const wrapper = mount(IngresosView)
-    await flushPromises()
-
-    await wrapper.find('select[aria-label="Filtrar por banco"]').setValue('b2')
-
-    const items = wrapper.findAll('.item-desglose-banco')
-    expect(items).toHaveLength(1)
-    expect(items[0].text()).toContain('Interbank')
-  })
-
-  it('filtro por mes: recalcula el desglose al subconjunto de ese mes', async () => {
-    const wrapper = mount(IngresosView)
-    await flushPromises()
-
-    await wrapper.find('select[aria-label="Filtrar por mes"]').setValue('2026-06')
-
-    const items = wrapper.findAll('.item-desglose-banco')
-    expect(items).toHaveLength(1)
-    expect(items[0].text()).toContain('BCP')
-    expect(items[0].text()).toContain('30.00')
-  })
-
-  it('borde: filtro sin resultados deja el desglose vacío/oculto, sin romper el estado vacío por filtro', async () => {
-    const wrapper = mount(IngresosView)
-    await flushPromises()
-
-    await wrapper.findAll('.chip-moneda').find((c) => c.text() === 'S/ Soles')!.trigger('click')
-    await wrapper.find('select[aria-label="Filtrar por banco"]').setValue('b2')
-
-    expect(wrapper.find('.desglose-bancos').exists()).toBe(false)
-    expect(wrapper.find('.estado-vacio-filtro').exists()).toBe(true)
-  })
-
-  it('borde: solo ingresos en "No especificado" → el desglose queda vacío pero el totalizador sigue sumando', async () => {
-    const bancoNoEspecificado: Banco = {
-      id: 'b3',
-      usuario_id: 'u1',
-      nombre: 'No especificado',
-      created_at: '',
-    }
-    const ingresoNoEspecificado: Ingreso = {
-      id: 'i4',
-      usuario_id: 'u1',
-      banco_id: 'b3',
-      fecha: '2026-07-20',
-      moneda: 'PEN',
-      importe: 75,
-      concepto: 'Varios',
-      created_at: '',
-    }
-    mockearCargaInicial({
-      ingresos: [ingresoNoEspecificado],
-      bancos: [...bancosFalsos, bancoNoEspecificado],
-    })
-
-    const wrapper = mount(IngresosView)
-    await flushPromises()
-
-    expect(wrapper.find('.desglose-bancos').exists()).toBe(false)
-    expect(wrapper.find('.resumen-totalizador').text()).toContain('75.00')
-  })
-})
-
-describe('IngresosView — agrupado por fecha', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-    mockearCargaInicial()
-  })
-
-  it('cada ingreso de un día distinto queda bajo su propio encabezado de grupo; desglose por banco y nota sin-banco siguen presentes', async () => {
-    const wrapper = mount(IngresosView)
-    await flushPromises()
-
-    const encabezados = wrapper.findAll('.encabezado-grupo-fecha')
-    expect(encabezados).toHaveLength(3) // 3 ingresos, 3 días distintos (10 jul, 15 jul, 1 jun)
-    expect(encabezados.map((e) => e.text())).toEqual(['10 de julio', '15 de julio', '1 de junio'])
-
-    expect(wrapper.find('.desglose-bancos').exists()).toBe(true)
-    expect(wrapper.findAll('.fila-ingreso')).toHaveLength(3)
+    const mayor = wrapper.findAllComponents({ name: 'TarjetaKpi' }).find((k) => k.props('label') === 'Mayor ingreso')!
+    expect(mayor.props('monto')).toBe(0)
+    expect(Number.isNaN(mayor.props('monto'))).toBe(false)
   })
 })

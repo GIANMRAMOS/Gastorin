@@ -6,6 +6,44 @@ import type { BorradorInput, Gasto } from '@/types/gasto'
 /** Código de PostgREST cuando `.single()` no encuentra ninguna fila ("no rows"). */
 const CODIGO_POSTGREST_SIN_FILAS = 'PGRST116'
 
+/** Ventana en días dentro de la cual dos borradores con mismo monto y banco se consideran "posible duplicado" (HU-14.2). */
+const VENTANA_DIAS_POSIBLE_DUPLICADO = 3
+const MS_POR_DIA = 24 * 60 * 60 * 1000
+
+/**
+ * HU-14.2: detecta posibles duplicados dentro de los borradores pendientes
+ * (ej. el correo del banco llegó dos veces). Dos borradores cuentan como
+ * "posible duplicado" entre sí cuando comparten el mismo `monto`, el mismo
+ * `banco_id`, y sus fechas están a 3 días o menos de diferencia. Un borrador
+ * en revisión manual (`monto == null`) NUNCA participa: todavía no hay nada
+ * que comparar. Función PURA en memoria (sin Supabase, sin tabla nueva): no
+ * toca el store, solo opera sobre la lista de borradores ya cargada.
+ */
+export function calcularPosiblesDuplicados(borradores: Gasto[]): Set<string> {
+  const idsDuplicados = new Set<string>()
+
+  for (let i = 0; i < borradores.length; i++) {
+    const borradorA = borradores[i]
+    if (borradorA.monto == null) continue
+
+    for (let j = i + 1; j < borradores.length; j++) {
+      const borradorB = borradores[j]
+      if (borradorB.monto == null) continue
+      if (borradorA.monto !== borradorB.monto) continue
+      if (borradorA.banco_id !== borradorB.banco_id) continue
+
+      const diferenciaDias =
+        Math.abs(new Date(borradorA.fecha).getTime() - new Date(borradorB.fecha).getTime()) / MS_POR_DIA
+      if (diferenciaDias <= VENTANA_DIAS_POSIBLE_DUPLICADO) {
+        idsDuplicados.add(borradorA.id)
+        idsDuplicados.add(borradorB.id)
+      }
+    }
+  }
+
+  return idsDuplicados
+}
+
 /**
  * Composable que encapsula todas las llamadas a Supabase para el dominio de
  * la bandeja de borradores (Épica 5). Sigue el precedente de `useCategorias`:

@@ -13,6 +13,7 @@ const categoriaPredefinida: Categoria = {
   id: 'c1',
   usuario_id: 'u1',
   nombre: 'Transporte',
+  tipo: 'gasto',
   predefinida: true,
   activa: true,
   creado_en: '',
@@ -23,6 +24,7 @@ const categoriaPersonalizada: Categoria = {
   id: 'c2',
   usuario_id: 'u1',
   nombre: 'Mascotas',
+  tipo: 'gasto',
   predefinida: false,
   activa: true,
   creado_en: '',
@@ -30,7 +32,7 @@ const categoriaPersonalizada: Categoria = {
 }
 
 function montarFormulario(categoria: Categoria | null = null) {
-  return mount(FormularioCategoria, { props: { categoria } })
+  return mount(FormularioCategoria, { props: { categoria, tipo: 'gasto' } })
 }
 
 describe('FormularioCategoria', () => {
@@ -55,9 +57,27 @@ describe('FormularioCategoria', () => {
       expect(builder.insert).toHaveBeenCalledWith({
         usuario_id: 'u1',
         nombre: 'Mascotas',
+        tipo: 'gasto',
         predefinida: false,
         activa: true,
       })
+      expect(wrapper.emitted('guardado')).toHaveLength(1)
+    })
+
+    it('el tipo se infiere de la prop `tipo` recibida (contexto de apertura), no lo elige el usuario: al crear desde el contexto "ingreso" también se envía ese tipo', async () => {
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      const categoriaCreada = { ...categoriaPersonalizada, id: 'ci-nueva', nombre: 'Freelance', tipo: 'ingreso' }
+      ;(builder.single as Mock).mockResolvedValueOnce({ data: categoriaCreada, error: null })
+
+      const wrapper = mount(FormularioCategoria, { props: { categoria: null, tipo: 'ingreso' } })
+      await wrapper.find('#nombre').setValue('Freelance')
+      await wrapper.find('form').trigger('submit.prevent')
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(builder.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ nombre: 'Freelance', tipo: 'ingreso' }),
+      )
       expect(wrapper.emitted('guardado')).toHaveLength(1)
     })
 

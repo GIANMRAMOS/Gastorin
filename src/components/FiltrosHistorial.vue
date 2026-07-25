@@ -1,18 +1,24 @@
 <script setup lang="ts">
+import { formatearMes } from '@/composables/useFechas'
 import type { Categoria } from '@/types/gasto'
 import type { Banco } from '@/types/ingreso'
 
 /**
- * Barra de filtros del historial: chips de moneda (Todos/Soles/Dólares) +
- * dropdowns de categoría, banco y mes. Componente presentacional puro (patrón
- * `v-model`/emit, como `ToggleMoneda`): no calcula el filtrado, solo emite
- * la selección para que la vista la aplique sobre `store.gastos`.
+ * Barra de filtros de Egresos (rediseño "Caudal", Fase 2): chips de moneda
+ * (Todos/Soles/Dólares) + buscador de texto libre (por descripción) +
+ * dropdowns de categoría, banco y mes (rotulado "Julio 2026", no el prefijo
+ * crudo `YYYY-MM`). Componente presentacional puro (patrón `v-model`/emit,
+ * como `ToggleMoneda`): no calcula el filtrado, solo emite la selección para
+ * que la vista la aplique sobre `store.gastos`. `categorias` ya debe venir
+ * filtrada a `tipo === 'gasto'` por quien la usa (blindaje del GATE 1 de esta
+ * fase vive en la vista, no aquí).
  */
 const props = defineProps<{
   moneda: 'todos' | 'PEN' | 'USD'
   categoriaId: string
   bancoId: string
   mes: string
+  busqueda: string
   categorias: Categoria[]
   bancos: Banco[]
   mesesDisponibles: string[]
@@ -23,6 +29,7 @@ const emit = defineEmits<{
   'update:categoriaId': [string]
   'update:bancoId': [string]
   'update:mes': [string]
+  'update:busqueda': [string]
 }>()
 
 /** Chips de moneda disponibles, con su etiqueta visual. */
@@ -51,6 +58,17 @@ function elegirMoneda(valor: 'todos' | 'PEN' | 'USD') {
       >
         {{ chip.etiqueta }}
       </button>
+    </div>
+
+    <div class="fila-buscador">
+      <input
+        type="search"
+        class="entrada-buscador"
+        placeholder="Buscar por descripción…"
+        aria-label="Buscar por descripción"
+        :value="props.busqueda"
+        @input="emit('update:busqueda', ($event.target as HTMLInputElement).value)"
+      />
     </div>
 
     <div class="selects-filtro">
@@ -86,7 +104,7 @@ function elegirMoneda(valor: 'todos' | 'PEN' | 'USD') {
       >
         <option value="">Todos los meses</option>
         <option v-for="mes in props.mesesDisponibles" :key="mes" :value="mes">
-          {{ mes }}
+          {{ formatearMes(mes) }}
         </option>
       </select>
     </div>
@@ -121,6 +139,22 @@ function elegirMoneda(valor: 'todos' | 'PEN' | 'USD') {
   border-color: var(--color-primario);
   background: #e2f4f1;
   color: #0b7a6e;
+}
+
+.fila-buscador {
+  display: flex;
+}
+
+.entrada-buscador {
+  flex: 1;
+  min-height: 44px;
+  padding: 0 var(--espacio-3);
+  border: 1px solid var(--color-borde);
+  border-radius: var(--radio-borde);
+  font-family: var(--fuente-base);
+  font-size: var(--tamano-pequeno);
+  color: var(--color-texto);
+  background: var(--color-fondo);
 }
 
 .selects-filtro {

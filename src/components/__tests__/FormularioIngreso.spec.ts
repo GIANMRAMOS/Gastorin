@@ -3,10 +3,12 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import FormularioIngreso from '@/components/FormularioIngreso.vue'
 import { useIngresosStore } from '@/stores/ingresos'
+import { useGastosStore } from '@/stores/gastos'
 import { useAuthStore } from '@/stores/auth'
 import { supabase } from '@/lib/supabaseClient'
 import { crearConstructorConsulta } from '@/lib/__mocks__/supabaseClient'
 import type { Banco, Ingreso } from '@/types/ingreso'
+import type { Categoria } from '@/types/gasto'
 
 const fromMock = supabase.from as unknown as Mock
 
@@ -17,10 +19,22 @@ const bancoFalso: Banco = {
   created_at: '',
 }
 
+const categoriaIngresoFalsa: Categoria = {
+  id: 'ci1',
+  usuario_id: 'u1',
+  nombre: 'Sueldo',
+  tipo: 'ingreso',
+  predefinida: true,
+  activa: true,
+  creado_en: '',
+  abreviatura: 'S',
+}
+
 const ingresoBase: Ingreso = {
   id: 'i1',
   usuario_id: 'u1',
   banco_id: 'b1',
+  categoria_id: 'ci1',
   fecha: '2026-07-10',
   moneda: 'PEN',
   importe: 100,
@@ -35,10 +49,18 @@ function montarFormulario(ingreso: Ingreso | null = null) {
 /** Llena todos los campos válidos, salvo los que se indiquen en `omitir`. */
 async function llenarCamposValidos(
   wrapper: ReturnType<typeof montarFormulario>,
-  overrides: Partial<{ importe: string; bancoId: string; moneda: string; fecha: string; concepto: string }> = {},
+  overrides: Partial<{
+    importe: string
+    bancoId: string
+    categoriaId: string
+    moneda: string
+    fecha: string
+    concepto: string
+  }> = {},
 ) {
   await wrapper.find('#importe').setValue(overrides.importe ?? '100')
   await wrapper.find('#banco').setValue(overrides.bancoId ?? 'b1')
+  await wrapper.find('#categoria-ingreso').setValue(overrides.categoriaId ?? 'ci1')
   await wrapper.find('#moneda-ingreso').setValue(overrides.moneda ?? 'PEN')
   await wrapper.find('#fecha-ingreso').setValue(overrides.fecha ?? '2026-07-10')
   await wrapper.find('#concepto').setValue(overrides.concepto ?? 'Sueldo')
@@ -50,21 +72,13 @@ describe('FormularioIngreso (HU-11.2)', () => {
     const authStore = useAuthStore()
     authStore.establecerUsuario({ id: 'u1', email: 'a@a.com' } as never)
     useIngresosStore().establecerBancos([bancoFalso])
+    useGastosStore().establecerCategorias([categoriaIngresoFalsa])
   })
 
-  it('camino feliz: fecha + banco + moneda + importe>0 + concepto crea el ingreso y emite guardado', async () => {
+  it('camino feliz: fecha + banco + categoría + moneda + importe>0 + concepto crea el ingreso y emite guardado', async () => {
     const builder = crearConstructorConsulta()
     fromMock.mockReturnValueOnce(builder)
-    const ingresoCreado = {
-      id: 'i1',
-      usuario_id: 'u1',
-      banco_id: 'b1',
-      fecha: '2026-07-10',
-      moneda: 'PEN',
-      importe: 100,
-      concepto: 'Sueldo',
-      created_at: '',
-    }
+    const ingresoCreado = { ...ingresoBase }
     ;(builder.single as Mock).mockResolvedValueOnce({ data: ingresoCreado, error: null })
 
     const wrapper = montarFormulario()
@@ -74,6 +88,7 @@ describe('FormularioIngreso (HU-11.2)', () => {
 
     expect(builder.insert).toHaveBeenCalledWith({
       banco_id: 'b1',
+      categoria_id: 'ci1',
       fecha: '2026-07-10',
       moneda: 'PEN',
       importe: 100,
@@ -124,6 +139,7 @@ describe('FormularioIngreso (HU-11.2)', () => {
   it('borde Gherkin — sin banco (payload sin banco_id): bloquea con "Selecciona un banco." sin llamar a Supabase', async () => {
     const wrapper = montarFormulario()
     await wrapper.find('#importe').setValue('100')
+    await wrapper.find('#categoria-ingreso').setValue('ci1')
     await wrapper.find('#moneda-ingreso').setValue('PEN')
     await wrapper.find('#fecha-ingreso').setValue('2026-07-10')
     await wrapper.find('#concepto').setValue('Sueldo')
@@ -133,6 +149,21 @@ describe('FormularioIngreso (HU-11.2)', () => {
 
     expect(fromMock).not.toHaveBeenCalled()
     expect(wrapper.find('[role="alert"]').text()).toBe('Selecciona un banco.')
+  })
+
+  it('borde: sin categoría (payload sin categoria_id): bloquea con "Selecciona una categoría." sin llamar a Supabase', async () => {
+    const wrapper = montarFormulario()
+    await wrapper.find('#importe').setValue('100')
+    await wrapper.find('#banco').setValue('b1')
+    await wrapper.find('#moneda-ingreso').setValue('PEN')
+    await wrapper.find('#fecha-ingreso').setValue('2026-07-10')
+    await wrapper.find('#concepto').setValue('Sueldo')
+    // No se toca #categoria-ingreso: queda en ''.
+    await wrapper.find('form').trigger('submit.prevent')
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(fromMock).not.toHaveBeenCalled()
+    expect(wrapper.find('[role="alert"]').text()).toBe('Selecciona una categoría.')
   })
 
   it('borde Gherkin — sin concepto (payload sin concepto): bloquea con "Ingresa un concepto." sin llamar a Supabase', async () => {
@@ -159,6 +190,7 @@ describe('FormularioIngreso (HU-11.2)', () => {
     const wrapper = montarFormulario()
     await wrapper.find('#importe').setValue('100')
     await wrapper.find('#banco').setValue('b1')
+    await wrapper.find('#categoria-ingreso').setValue('ci1')
     await wrapper.find('#moneda-ingreso').setValue('PEN')
     await wrapper.find('#concepto').setValue('Sueldo')
     // Con el default de fecha=hoy, hay que vaciar el campo explícitamente
@@ -169,6 +201,64 @@ describe('FormularioIngreso (HU-11.2)', () => {
 
     expect(fromMock).not.toHaveBeenCalled()
     expect(wrapper.find('[role="alert"]').text()).toBe('Selecciona una fecha.')
+  })
+
+  describe('selector de categoría (Épica 12, migración 008)', () => {
+    it('el <select> de categoría solo ofrece categorías de tipo "ingreso" (blindaje GATE 1)', () => {
+      const storeGastos = useGastosStore()
+      const categoriaGasto: Categoria = {
+        id: 'c1',
+        usuario_id: 'u1',
+        nombre: 'Comida',
+        tipo: 'gasto',
+        predefinida: true,
+        activa: true,
+        creado_en: '',
+        abreviatura: 'C',
+      }
+      storeGastos.establecerCategorias([categoriaIngresoFalsa, categoriaGasto])
+
+      const wrapper = montarFormulario()
+
+      const opciones = wrapper.findAll('#categoria-ingreso option')
+      expect(opciones.map((o) => o.text())).toContain('Sueldo')
+      expect(opciones.map((o) => o.text())).not.toContain('Comida')
+    })
+
+    it('elegir una opción del <select> de categoría escribe el id elegido', async () => {
+      const storeGastos = useGastosStore()
+      const otraCategoria: Categoria = { ...categoriaIngresoFalsa, id: 'ci2', nombre: 'Freelance' }
+      storeGastos.establecerCategorias([categoriaIngresoFalsa, otraCategoria])
+
+      const wrapper = montarFormulario()
+      await wrapper.find('#categoria-ingreso').setValue('ci2')
+
+      expect((wrapper.find('#categoria-ingreso').element as HTMLSelectElement).value).toBe('ci2')
+    })
+
+    it('las categorías del <select> se ofrecen en orden alfabético', async () => {
+      const storeGastos = useGastosStore()
+      const rendimientos: Categoria = { ...categoriaIngresoFalsa, id: 'ci3', nombre: 'Rendimientos' }
+      const otrosIngresos: Categoria = { ...categoriaIngresoFalsa, id: 'ci4', nombre: 'Otros ingresos' }
+      storeGastos.establecerCategorias([categoriaIngresoFalsa, rendimientos, otrosIngresos])
+
+      const wrapper = montarFormulario()
+
+      const opciones = wrapper.findAll('#categoria-ingreso option:not([disabled])')
+      expect(opciones.map((o) => o.text())).toEqual(['Otros ingresos', 'Rendimientos', 'Sueldo'])
+    })
+
+    it('borde: sin categorías de ingreso activas, el formulario se bloquea entero y no llama a Supabase', async () => {
+      useGastosStore().establecerCategorias([])
+
+      const wrapper = montarFormulario()
+      await wrapper.find('form').trigger('submit.prevent')
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(fromMock).not.toHaveBeenCalled()
+      expect(wrapper.find('[role="alert"]').text()).toBe('No hay categorías de ingreso; créalas primero.')
+      expect(wrapper.find('button[type="submit"]').attributes('disabled')).toBeDefined()
+    })
   })
 
   describe('defaults de alta (chunk A): moneda PEN y fecha de hoy', () => {
@@ -195,21 +285,13 @@ describe('FormularioIngreso (HU-11.2)', () => {
     it('camino feliz: sin tocar fecha ni moneda, crea el ingreso con moneda PEN y la fecha de hoy', async () => {
       const builder = crearConstructorConsulta()
       fromMock.mockReturnValueOnce(builder)
-      const ingresoCreado = {
-        id: 'i1',
-        usuario_id: 'u1',
-        banco_id: 'b1',
-        fecha: '2026-07-22',
-        moneda: 'PEN',
-        importe: 100,
-        concepto: 'Sueldo',
-        created_at: '',
-      }
+      const ingresoCreado = { ...ingresoBase, fecha: '2026-07-22' }
       ;(builder.single as Mock).mockResolvedValueOnce({ data: ingresoCreado, error: null })
 
       const wrapper = montarFormulario()
       await wrapper.find('#importe').setValue('100')
       await wrapper.find('#banco').setValue('b1')
+      await wrapper.find('#categoria-ingreso').setValue('ci1')
       await wrapper.find('#concepto').setValue('Sueldo')
       await wrapper.find('form').trigger('submit.prevent')
       await new Promise((r) => setTimeout(r, 0))
@@ -269,12 +351,13 @@ describe('FormularioIngreso (HU-11.2)', () => {
   })
 
   describe('HU-11.3 — editar ingreso', () => {
-    it('camino feliz: los 5 campos aparecen prellenados con los valores del ingreso; al cambiar uno y enviar actualiza (no inserta)', async () => {
+    it('camino feliz: los 6 campos aparecen prellenados con los valores del ingreso; al cambiar uno y enviar actualiza (no inserta)', async () => {
       const wrapper = montarFormulario(ingresoBase)
 
       // Prellenado
       expect((wrapper.find('#importe').element as HTMLInputElement).value).toBe('100')
       expect((wrapper.find('#banco').element as HTMLSelectElement).value).toBe('b1')
+      expect((wrapper.find('#categoria-ingreso').element as HTMLSelectElement).value).toBe('ci1')
       expect((wrapper.find('#moneda-ingreso').element as HTMLSelectElement).value).toBe('PEN')
       expect((wrapper.find('#fecha-ingreso').element as HTMLInputElement).value).toBe('2026-07-10')
       expect((wrapper.find('#concepto').element as HTMLInputElement).value).toBe('Sueldo')
@@ -291,6 +374,7 @@ describe('FormularioIngreso (HU-11.2)', () => {
 
       expect(builder.update).toHaveBeenCalledWith({
         banco_id: 'b1',
+        categoria_id: 'ci1',
         fecha: '2026-07-10',
         moneda: 'PEN',
         importe: 250,

@@ -2,15 +2,17 @@
 import { onMounted, onUnmounted } from 'vue'
 import FormularioCategoria from '@/components/FormularioCategoria.vue'
 import { useUiStore } from '@/stores/ui'
-import type { Categoria } from '@/types/gasto'
+import type { Categoria, TipoCategoria } from '@/types/gasto'
 
 /**
  * Envoltorio de modal/overlay para el formulario de categoría (alta o
  * edición/detalle), igual patrón que `ModalGasto.vue`. Cierra solo con el
- * botón de cierre (X).
+ * botón de cierre (X). `tipo` se recibe de quien abre el modal (fija el
+ * contexto gasto/ingreso) y se reenvía tal cual a `FormularioCategoria`.
  */
 defineProps<{
   categoria?: Categoria | null
+  tipo: TipoCategoria
 }>()
 
 const emit = defineEmits<{
@@ -40,6 +42,7 @@ onUnmounted(() => {
       </div>
       <FormularioCategoria
         :categoria="categoria"
+        :tipo="tipo"
         @guardado="emit('guardado')"
         @cerrar="emit('cerrar')"
         @pedir-desactivar="emit('pedir-desactivar')"

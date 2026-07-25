@@ -132,5 +132,39 @@ export function useMoneda() {
     return resultado
   }
 
-  return { formatearMonto, resumenMonedaPredominante, saldosPorBanco, montoSinBancoPorMoneda }
+  /**
+   * Dado un conjunto ya filtrado de ítems con categoría y moneda, suma los
+   * montos de la `moneda` pedida por `categoria_id`, ordenado de mayor a
+   * menor total. Espejo de `saldosPorBanco`, pero SIN exclusiones: a
+   * diferencia de banco (que tenía un valor de respaldo "No especificado"),
+   * la categoría es obligatoria tanto en Gasto como en Ingreso (migración
+   * `008`), así que no existe un caso "sin categoría" que excluir. Se usa
+   * para alimentar `ListaGastoPorCategoria` en el sidebar "Por categoría" de
+   * Egresos e Ingresos (Fase 2 "Caudal").
+   */
+  function totalesPorCategoria(
+    items: Array<{ categoria_id: string; nombre: string; moneda: Moneda; monto: number }>,
+    moneda: Moneda,
+  ): Array<{ categoria_id: string; nombre: string; total: number }> {
+    const acumuladoPorCategoria = new Map<string, { nombre: string; total: number }>()
+
+    for (const item of items) {
+      if (item.moneda !== moneda) continue
+      const entrada = acumuladoPorCategoria.get(item.categoria_id) ?? { nombre: item.nombre, total: 0 }
+      entrada.total += item.monto
+      acumuladoPorCategoria.set(item.categoria_id, entrada)
+    }
+
+    return Array.from(acumuladoPorCategoria.entries())
+      .map(([categoria_id, { nombre, total }]) => ({ categoria_id, nombre, total }))
+      .sort((a, b) => b.total - a.total)
+  }
+
+  return {
+    formatearMonto,
+    resumenMonedaPredominante,
+    saldosPorBanco,
+    montoSinBancoPorMoneda,
+    totalesPorCategoria,
+  }
 }

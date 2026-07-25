@@ -6,14 +6,27 @@ import {
   cargarTendenciaMensual,
   cargarTendenciaDiaria,
   cargarBalancePorMoneda,
+  calcularSaldoNetoPorCuenta,
   combinarUltimosMovimientos,
+  combinarMovimientosDelMes,
+  proyeccionCierreMes,
   useDashboard,
 } from '@/composables/useDashboard'
 import { useGastosStore } from '@/stores/gastos'
 import { supabase } from '@/lib/supabaseClient'
 import { crearConstructorConsulta } from '@/lib/__mocks__/supabaseClient'
 import type { Gasto } from '@/types/gasto'
-import type { Ingreso } from '@/types/ingreso'
+import type { Banco, Ingreso } from '@/types/ingreso'
+
+function bancoDe(datos: Partial<Banco>): Banco {
+  return {
+    id: `b-${Math.random()}`,
+    usuario_id: 'u1',
+    nombre: 'BCP Debito',
+    created_at: '',
+    ...datos,
+  }
+}
 
 const fromMock = supabase.from as unknown as Mock
 
@@ -22,6 +35,7 @@ function ingresoDe(datos: Partial<Ingreso>): Ingreso {
     id: `i-${Math.random()}`,
     usuario_id: 'u1',
     banco_id: 'b1',
+    categoria_id: 'ci1',
     fecha: '2026-07-10',
     moneda: 'PEN',
     importe: 100,
@@ -351,6 +365,86 @@ describe('useDashboard', () => {
     })
   })
 
+  describe('calcularSaldoNetoPorCuenta (Dashboard, ajuste de alcance: solo BCP e IBK)', () => {
+    it('camino feliz: saldo = ingresos - gastos por banco, en PEN', () => {
+      const bancos = [bancoDe({ id: 'b1', nombre: 'BCP' }), bancoDe({ id: 'b2', nombre: 'IBK' })]
+      const gastos = [
+        gastoDe({ banco_id: 'b1', moneda: 'PEN', monto: 200 }),
+        gastoDe({ banco_id: 'b2', moneda: 'PEN', monto: 50 }),
+      ]
+      const ingresos = [
+        ingresoDe({ banco_id: 'b1', moneda: 'PEN', importe: 500 }),
+        ingresoDe({ banco_id: 'b2', moneda: 'PEN', importe: 100 }),
+      ]
+
+      const saldos = calcularSaldoNetoPorCuenta(bancos, gastos, ingresos)
+
+      expect(saldos).toEqual([
+        { bancoId: 'b1', nombreBanco: 'BCP', saldoPen: 300, saldoUsd: null },
+        { bancoId: 'b2', nombreBanco: 'IBK', saldoPen: 50, saldoUsd: null },
+      ])
+    })
+
+    it('borde clave: solo se ofrecen cuentas cuyo nombre empiece con "BCP"/"IBK" (case-insensitive); cualquier otro banco se ignora', () => {
+      const bancos = [
+        bancoDe({ id: 'b1', nombre: 'bcp ahorros' }),
+        bancoDe({ id: 'b2', nombre: 'IBK' }),
+        bancoDe({ id: 'b3', nombre: 'No especificado' }),
+        bancoDe({ id: 'b4', nombre: 'Interbank Otro' }),
+      ]
+
+      const saldos = calcularSaldoNetoPorCuenta(bancos, [], [])
+
+      expect(saldos.map((s) => s.bancoId)).toEqual(['b1', 'b2'])
+    })
+
+    it('cada cuenta SIEMPRE aparece aunque su saldo sea 0 (a diferencia de saldosPorBanco)', () => {
+      const bancos = [bancoDe({ id: 'b1', nombre: 'BCP' })]
+
+      const saldos = calcularSaldoNetoPorCuenta(bancos, [], [])
+
+      expect(saldos).toEqual([{ bancoId: 'b1', nombreBanco: 'BCP', saldoPen: 0, saldoUsd: null }])
+    })
+
+    it('"nombreBanco" es el nombre real del banco tal cual (ya no hay etiqueta de despliegue: bancos.nombre está consolidado a "BCP"/"IBK" en la BD)', () => {
+      const bancos = [bancoDe({ id: 'b1', nombre: 'BCP' }), bancoDe({ id: 'b2', nombre: 'IBK' })]
+
+      const saldos = calcularSaldoNetoPorCuenta(bancos, [], [])
+
+      expect(saldos.find((s) => s.bancoId === 'b1')?.nombreBanco).toBe('BCP')
+      expect(saldos.find((s) => s.bancoId === 'b2')?.nombreBanco).toBe('IBK')
+    })
+
+    it('saldoUsd es `null` si el banco nunca tuvo movimiento en USD (no se muestra badge vacío)', () => {
+      const bancos = [bancoDe({ id: 'b1', nombre: 'BCP Debito' })]
+      const gastos = [gastoDe({ banco_id: 'b1', moneda: 'PEN', monto: 50 })]
+
+      const saldos = calcularSaldoNetoPorCuenta(bancos, gastos, [])
+
+      expect(saldos[0].saldoUsd).toBeNull()
+    })
+
+    it('saldoUsd se calcula por separado (nunca se mezcla con PEN) cuando el banco sí tuvo movimiento en USD', () => {
+      const bancos = [bancoDe({ id: 'b1', nombre: 'BCP Debito' })]
+      const gastos = [gastoDe({ banco_id: 'b1', moneda: 'USD', monto: 10 })]
+      const ingresos = [
+        ingresoDe({ banco_id: 'b1', moneda: 'PEN', importe: 1000 }),
+        ingresoDe({ banco_id: 'b1', moneda: 'USD', importe: 30 }),
+      ]
+
+      const saldos = calcularSaldoNetoPorCuenta(bancos, gastos, ingresos)
+
+      expect(saldos[0].saldoPen).toBe(1000)
+      expect(saldos[0].saldoUsd).toBe(20)
+    })
+
+    it('sin bancos BCP/IBK creados, devuelve un array vacío (no inventa cuentas)', () => {
+      const saldos = calcularSaldoNetoPorCuenta([bancoDe({ id: 'b1', nombre: 'Otro banco' })], [], [])
+
+      expect(saldos).toEqual([])
+    })
+  })
+
   describe('combinarUltimosMovimientos', () => {
     it('camino feliz: mezcla gastos e ingresos por fecha desc, sin importar el array de origen', () => {
       const gastos = [gastoDe({ id: 'g1', fecha: '2026-07-18' })]
@@ -437,6 +531,8 @@ describe('useDashboard', () => {
         descripcion: 'Taxi',
         moneda: 'USD',
         id: 'g1',
+        categoriaId: 'c1',
+        bancoId: 'b1',
       })
       expect(movimientoIngreso).toEqual({
         tipo: 'ingreso',
@@ -445,7 +541,135 @@ describe('useDashboard', () => {
         descripcion: 'Sueldo',
         moneda: 'PEN',
         id: 'i1',
+        categoriaId: null,
+        bancoId: 'b1',
       })
+    })
+
+    it('MovimientoUnificado extendido: un gasto trae categoriaId/bancoId reales; un ingreso trae categoriaId=null y su bancoId', () => {
+      const gasto = gastoDe({ id: 'g1', categoria_id: 'cat-comida', banco_id: 'banco-bcp' })
+      const ingreso = ingresoDe({ id: 'i1', banco_id: 'banco-bbva' })
+
+      const movimientos = combinarUltimosMovimientos([gasto], [ingreso])
+      const movimientoGasto = movimientos.find((m) => m.tipo === 'gasto')!
+      const movimientoIngreso = movimientos.find((m) => m.tipo === 'ingreso')!
+
+      expect(movimientoGasto.categoriaId).toBe('cat-comida')
+      expect(movimientoGasto.bancoId).toBe('banco-bcp')
+      expect(movimientoIngreso.categoriaId).toBeNull()
+      expect(movimientoIngreso.bancoId).toBe('banco-bbva')
+    })
+  })
+
+  describe('combinarMovimientosDelMes (Fase 0 "Caudal" — feed unificado de Inicio)', () => {
+    it('camino feliz: mezcla gastos+ingresos del mes/moneda, orden desc por fecha, sin tope de 5', () => {
+      const gastos = [
+        gastoDe({ id: 'g1', fecha: '2026-07-01', moneda: 'PEN' }),
+        gastoDe({ id: 'g2', fecha: '2026-07-02', moneda: 'PEN' }),
+        gastoDe({ id: 'g3', fecha: '2026-07-03', moneda: 'PEN' }),
+      ]
+      const ingresos = [
+        ingresoDe({ id: 'i1', fecha: '2026-07-04', moneda: 'PEN' }),
+        ingresoDe({ id: 'i2', fecha: '2026-07-05', moneda: 'PEN' }),
+        ingresoDe({ id: 'i3', fecha: '2026-07-06', moneda: 'PEN' }),
+      ]
+
+      const movimientos = combinarMovimientosDelMes(gastos, ingresos, '2026-07-01', 'PEN', 'todos')
+
+      expect(movimientos).toHaveLength(6)
+      expect(movimientos.map((m) => m.id)).toEqual(['i3', 'i2', 'i1', 'g3', 'g2', 'g1'])
+    })
+
+    it('filtro por tipo: "ingresos" solo devuelve ingresos', () => {
+      const gastos = [gastoDe({ id: 'g1', fecha: '2026-07-01', moneda: 'PEN' })]
+      const ingresos = [ingresoDe({ id: 'i1', fecha: '2026-07-02', moneda: 'PEN' })]
+
+      const movimientos = combinarMovimientosDelMes(gastos, ingresos, '2026-07-01', 'PEN', 'ingresos')
+
+      expect(movimientos.map((m) => m.id)).toEqual(['i1'])
+    })
+
+    it('filtro por tipo: "egresos" solo devuelve gastos', () => {
+      const gastos = [gastoDe({ id: 'g1', fecha: '2026-07-01', moneda: 'PEN' })]
+      const ingresos = [ingresoDe({ id: 'i1', fecha: '2026-07-02', moneda: 'PEN' })]
+
+      const movimientos = combinarMovimientosDelMes(gastos, ingresos, '2026-07-01', 'PEN', 'egresos')
+
+      expect(movimientos.map((m) => m.id)).toEqual(['g1'])
+    })
+
+    it('filtro por tipo: "todos" devuelve ambos', () => {
+      const gastos = [gastoDe({ id: 'g1', fecha: '2026-07-01', moneda: 'PEN' })]
+      const ingresos = [ingresoDe({ id: 'i1', fecha: '2026-07-02', moneda: 'PEN' })]
+
+      const movimientos = combinarMovimientosDelMes(gastos, ingresos, '2026-07-01', 'PEN', 'todos')
+
+      expect(movimientos.map((m) => m.id).sort()).toEqual(['g1', 'i1'])
+    })
+
+    it('filtro de moneda: excluye movimientos de otra moneda', () => {
+      const gastos = [
+        gastoDe({ id: 'g-pen', fecha: '2026-07-01', moneda: 'PEN' }),
+        gastoDe({ id: 'g-usd', fecha: '2026-07-01', moneda: 'USD' }),
+      ]
+      const ingresos = [
+        ingresoDe({ id: 'i-pen', fecha: '2026-07-01', moneda: 'PEN' }),
+        ingresoDe({ id: 'i-usd', fecha: '2026-07-01', moneda: 'USD' }),
+      ]
+
+      const movimientos = combinarMovimientosDelMes(gastos, ingresos, '2026-07-01', 'PEN', 'todos')
+
+      expect(movimientos.map((m) => m.id).sort()).toEqual(['g-pen', 'i-pen'])
+    })
+
+    it('filtro de mes: excluye movimientos de otro mes', () => {
+      const gastos = [
+        gastoDe({ id: 'g-jul', fecha: '2026-07-15', moneda: 'PEN' }),
+        gastoDe({ id: 'g-jun', fecha: '2026-06-15', moneda: 'PEN' }),
+      ]
+      const ingresos = [
+        ingresoDe({ id: 'i-jul', fecha: '2026-07-15', moneda: 'PEN' }),
+        ingresoDe({ id: 'i-jun', fecha: '2026-06-15', moneda: 'PEN' }),
+      ]
+
+      const movimientos = combinarMovimientosDelMes(gastos, ingresos, '2026-07-01', 'PEN', 'todos')
+
+      expect(movimientos.map((m) => m.id).sort()).toEqual(['g-jul', 'i-jul'])
+    })
+
+    it('borde: sin datos devuelve []', () => {
+      expect(combinarMovimientosDelMes([], [], '2026-07-01', 'PEN', 'todos')).toEqual([])
+    })
+
+    it('límite: más de 5 movimientos en el mes devuelve TODOS (sin tope de 5, a diferencia de combinarUltimosMovimientos)', () => {
+      const gastos = Array.from({ length: 4 }, (_, i) =>
+        gastoDe({ id: `g${i}`, fecha: `2026-07-0${i + 1}`, moneda: 'PEN' }),
+      )
+      const ingresos = Array.from({ length: 4 }, (_, i) =>
+        ingresoDe({ id: `i${i}`, fecha: `2026-07-1${i + 1}`, moneda: 'PEN' }),
+      )
+
+      const movimientos = combinarMovimientosDelMes(gastos, ingresos, '2026-07-01', 'PEN', 'todos')
+
+      expect(movimientos).toHaveLength(8)
+    })
+  })
+
+  describe('proyeccionCierreMes (Fase 0 "Caudal" — resumen de presupuesto)', () => {
+    it('camino feliz: gastado 300, día 10, mes de 30 días -> proyecta 900', () => {
+      expect(proyeccionCierreMes(300, 10, 30)).toBe(900)
+    })
+
+    it('borde: diaActual = 0 -> 0 (sin división por cero)', () => {
+      expect(proyeccionCierreMes(300, 0, 30)).toBe(0)
+    })
+
+    it('borde: diaActual negativo -> 0 (dato inválido, mismo guard)', () => {
+      expect(proyeccionCierreMes(300, -1, 30)).toBe(0)
+    })
+
+    it('borde: mes sin gasto (gastado 0) -> proyección 0', () => {
+      expect(proyeccionCierreMes(0, 10, 30)).toBe(0)
     })
   })
 

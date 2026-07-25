@@ -34,6 +34,8 @@ async function montarShell() {
       { path: '/presupuestos', name: 'presupuestos', component: { template: '<div>Presupuestos</div>' } },
       { path: '/ingresos', name: 'ingresos', component: { template: '<div>Ingresos</div>' } },
       { path: '/bancos', name: 'bancos', component: { template: '<div>Bancos</div>' } },
+      { path: '/graficos', name: 'graficos', component: { template: '<div>Gráficos</div>' } },
+      { path: '/maestros', name: 'maestros', component: { template: '<div>Maestros</div>' } },
     ],
   })
   router.push('/')

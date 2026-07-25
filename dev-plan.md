@@ -1,104 +1,116 @@
-# Micro-plan — Listas agrupadas por fecha (Historial/Ingresos) + widget "Últimos movimientos" (Dashboard)
+# Micro-plan — Fase 4 "Caudal": PresupuestosView (Épicas 15 Hero+stats · 16 desglose semanal · 17 copiar mes anterior)
 
-> Sobrescribe un `dev-plan.md` previo (tarea "desglose neto por banco", ya cerrada).
+> Sobrescribe el `dev-plan.md` de la Fase 3 (Bandeja maestro-detalle, ya construida y verificada; sus resultados están en el código actual).
+> Alcance: REEMPLAZA `PresupuestosView.vue` (hoy una lista simple de `TarjetaPresupuesto`). NO tocar Ingresos/Egresos/Bandeja/Dashboard/App Shell.
+> La suite tarda: iterar con `npx vitest run <archivo>` por archivo.
 
 ## Patrón arquitectónico detectado
 
-Vue 3 `<script setup lang="ts">` + Pinia + Supabase, con separación de capas muy consistente:
+Verificado leyendo el código real (no asumido): `PresupuestosView.vue`, `usePresupuestos.ts`, `TarjetaPresupuesto.vue`, `ModalPresupuesto.vue`, `TablaMovimientos.vue`, `TarjetaKpi.vue`, `TarjetaBalanceMoneda.vue`, `TarjetaPresupuestoResumen.vue`, `DashboardView.vue`, `useDashboard.ts`, `useMoneda.ts`, `ToggleMoneda.vue`, `stores/gastos.ts`, `types/gasto.ts`, `useIngresos.ts`, migración `009_metas_ahorro.sql`.
 
-- **Lógica pura de dominio → funciones exportadas a nivel de módulo dentro de un archivo `useX.ts`.** No son "composables reactivos": reciben datos ya cargados y devuelven agregados. Precedentes: `cargarResumenPorMoneda`, `cargarGastoPorCategoria`, `cargarTendenciaMensual`, `cargarTendenciaDiaria`, `cargarBalancePorMoneda` (todas `export function` sueltas en `useDashboard.ts`, fuera de `useDashboard()`), y `calcularAbreviaturas` (exportada desde `useCategorias.ts`, con su propio `calcularAbreviaturas.spec.ts`). `useColorCategoria`/`useMoneda` son composables puros (sin estado ni store).
-- **Cada función pura tiene un `.spec.ts` en `src/<capa>/__tests__/`** (Vitest), con casos "camino feliz / borde / mayoría / vacío". Cobertura alta y sistemática.
-- **Componentes presentacionales puros** en `src/components/` reciben props ya calculadas y solo formatean/renderizan (`TarjetaResumenMoneda.vue`, `ListaGastoPorCategoria.vue`, `TarjetaBalanceMoneda.vue`), cada uno con su spec. Colores semánticos vía variables CSS `--color-error` (rojo) / `--color-exito` (verde), ya usados en `TarjetaResumenMoneda`.
-- **Las vistas** (`src/views/`) orquestan: cargan datos vía composables, derivan `computed`, resuelven nombres contra los stores y pasan props a los componentes. Historial e Ingresos son casi clones estructurales entre sí.
-- **Formato de fecha en filas hoy:** crudo — se imprime `gasto.fecha` / `ingreso.fecha` (`YYYY-MM-DD`) tal cual en los metadatos. No existe helper de formateo de fecha todavía.
-- **Zona horaria ya resuelta:** `useDashboard.ts` construye fechas con `new Date(anio, mes, dia)` y `getFullYear/getMonth/getDate`, NO `toISOString()`, a propósito, para evitar el desfase a UTC (ver comentario de `fechaDiaRelativo`). El agrupador debe seguir esa convención.
-- **Datos ya ordenados desc:** `store.gastos` (`.order` en `cargarGastos`), `store.ingresos` (`cargarIngresos`), y `filas`/`filasIngresos` (`.order('fecha', { ascending: false })`). El agrupador recibe items ya ordenados y NO reordena; el combinador del dashboard sí ordena (mezcla dos fuentes ordenadas por separado).
+- **Capas.** La vista (`views/*.vue`) orquesta el `onMounted` (dispara varias cargas en paralelo sin `await` entre ellas — el store cuenta `cargasEnVuelo`), calcula `computed` derivados y compone componentes **presentacionales puros** que reciben los números ya calculados (patrón `DashboardView` → `TarjetaKpi`/`TarjetaPresupuestoResumen`/`TarjetaBalanceMoneda`). La IO de dominio (crear/editar/eliminar) puede vivir en la vista con `@emit` (patrón `PresupuestosView` actual: `TarjetaPresupuesto` emite `editar`/`eliminar`). Para esta fase, **mantener el patrón presentacional-puro de Dashboard**: los componentes nuevos reciben props ya calculadas y emiten eventos; los cálculos son funciones puras exportadas del composable.
+- **Composables = sub-dominio sobre un store Pinia compartido.** `usePresupuestos.ts` es sub-dominio de `useGastosStore` (mismo precedente que `useCategorias`/`useBandeja`). Cada acción: `store.establecerCargando(true)` + `limpiarError()` al entrar, `establecerCargando(false)` en `finally`, devuelve `true`/`false`, escribe error en español al store, `usuario_id` de `useAuthStore().usuario?.id`. Unicidad Postgres = código `23505` → mensaje claro.
+- **Funciones puras exportadas del composable, testeadas aisladas.** `calcularGastado` (en `usePresupuestos.ts`), `proyeccionCierreMes`/`cargarBalancePorMoneda`/`cargarResumenPorMoneda` (en `useDashboard.ts`). Filtran por `moneda` y por prefijo `YYYY-MM` de `fecha`; **nunca mezclan PEN/USD**. Este es el molde exacto para `calcularDesgloseSemanal` que trae el brief.
+- **`store.gastos` = solo `estado='confirmado'`** (documentado en `stores/gastos.ts` y en el header de `useGastos.cargarGastos`). `PresupuestosView` hoy carga `cargarGastos()` (todos los confirmados, sin ventana de mes) + `cargarCategorias()` + `cargarPresupuestos()`. `calcularGastado`/`calcularDesgloseSemanal` filtran el mes en memoria, así que basta con esas tres cargas. "Días sin gasto" y "Categorías excedidas" también salen de `store.gastos` + `store.presupuestos` en memoria.
+- **Hero oscuro = tokens fijos `#1a1a18` + texto blanco.** Referencia canónica: `TarjetaKpi.vue` variante `balance` (`background:#1a1a18; border-color:#1a1a18; .monto → #fff; etiqueta → rgba(255,255,255,.7); subtítulo → rgba(255,255,255,.55); negativo → oklch(0.7 0.14 25)`). El botón `+ Registrar`/`boton-registrar` de Dashboard también usa `#1a1a18`. No hay un token CSS con nombre para ese color: es literal en el scoped CSS (así se replica).
+- **Barra de progreso con 3 estados.** `TarjetaPresupuesto`/`TarjetaPresupuestoResumen` ya definen el mismo patrón: `porcentaje` real (puede pasar 100), `porcentajeBarra = min(100)`, `UMBRAL_ADVERTENCIA = 85`, estados `normal`(`--color-primario`)/`cerca`(`--color-advertencia`)/`sobregiro`(`--color-error`), y a11y: **el texto del % SIEMPRE usa `--color-texto`/blanco, nunca el color variable de la barra**. Reusar ese mismo lenguaje visual.
+- **"Excedido" en rojo.** Token `--color-error` (+ `--color-error-fondo` y `--color-error` para el banner, ver `.banner-sobregiro` de `TarjetaPresupuesto`). El brief pide "excedido en S/Y" y las "categorías excedidas" en `--color-error`.
+- **Toggle de moneda.** `ToggleMoneda` con `v-model` sobre un `ref<Moneda>('PEN')` local de la vista (`monedaSeleccionada`, patrón `DashboardView`); pasar `mostrar-simbolo`. Todos los agregados (hero, stats, desglose) se recalculan como `computed` de `monedaSeleccionada`.
+- **Patrón responsive "colapso a tarjetas".** `TablaMovimientos.vue`: `<table>` con `data-etiqueta` en cada `<td>`; en `@media (max-width: 640px)` el `thead` se oculta y cada `<td>` pasa a `display:flex` mostrando `attr(data-etiqueta)` con `::before`. **Ojo con el breakpoint:** la tabla colapsa en **640px**, pero el grid maestro-detalle de vistas (`DashboardView`/`HistorialView`/`AppShellLayout`) colapsa en **900px**. Para esta vista: grid de la página en 900px, colapso de las filas-tabla en 640px (coherente con `TablaMovimientos`).
+- **`metas_ahorro` (migración 009) ya existe en producción.** PK `usuario_id`, `descripcion text not null`, `monto numeric(12,2) not null check(>0)`, `actualizado_en`. RLS CRUD propio (`for all using usuario_id = auth.uid()`). **NO existe** `type MetaAhorro`, **NO existe** `useMetasAhorro.ts`, **NO hay** campo en ningún store (confirmado por glob: solo aparece el `.sql`). Es una fila única por usuario.
+- **`presupuestos` se cargan solo del mes actual.** `cargarPresupuestos` hace `.eq('mes', primerDiaMesActual())`. Épica 17 ("copiar de mes anterior") necesita además leer los presupuestos del **mes anterior** → query nueva. `primerDiaMesActual()` es privada de `usePresupuestos.ts`; `useDashboard.ts` tiene su propio `primerDiaDeMesRelativo(mesesAtras)` (y su comentario dice explícitamente que NO se extrajo un helper compartido).
+- **Tests.** Funciones puras: spec aislado del composable (`usePresupuestos.riesgo.spec.ts` ya existe). Componentes presentacionales: mount con props (`TarjetaPresupuesto.spec.ts`, `TarjetaPresupuestoResumen.spec.ts`). Vistas: integración estubando `supabase.from` por tabla. Sin snapshots.
 
 ## Desviación de arquitectura
 
-- ¿Se necesita desviarse? **NO.**
-- Todo encaja en patrones ya establecidos:
-  - Funciones puras nuevas (`agruparPorFecha`, `etiquetaFecha`, `combinarUltimosMovimientos`) idénticas en forma a las funciones-módulo de `useDashboard.ts`/`useCategorias.ts`.
-  - Widget del dashboard = un componente presentacional más, como `ListaGastoPorCategoria`.
-  - Agrupado en el template = reestructurar el `v-for` existente (lista plana → grupos), sin tocar filtros, estados vacíos, totalizador ni stores.
-- **Sin cambios de modelo de datos, sin nueva ruta, sin nuevo patrón de estado. No dispara GATE 1.**
+- **¿Se necesita desviarse? NO** — no dispara GATE 1. Todo encaja en patrones ya establecidos:
+  - `calcularDesgloseSemanal` + `numeroSemanaDelMes`: función pura exportada de `usePresupuestos.ts`, idéntica en forma a `calcularGastado`. El brief ya fija la implementación exacta.
+  - `useMetasAhorro.ts`: **la tabla `metas_ahorro` ya está creada** por Data (migración 009). Solo la consumimos → **no cambia el modelo de datos**. El composable es el mismo patrón sub-dominio de `useBandeja`/`useCategorias`. `type MetaAhorro` en `types/` = mismo patrón (interfaz espejo de tabla).
+  - Épica 17: query extra al mes anterior + insert masivo de filas clonadas = mismas tablas, mismo patrón de acción de `usePresupuestos`. No es modelo nuevo.
+  - El hero oscuro, la barra de 3 estados y el colapso responsive **reutilizan patrones y tokens ya existentes**; no se inventa nada nuevo.
 
-### Decisiones de ubicación (justificadas)
-
-1. **`agruparPorFecha` + `etiquetaFecha` → nuevo `src/composables/useFechas.ts`** (composable de fechas genérico). NO en `useMoneda.ts` (mal fit: no es dinero), NO en un `useAgrupacionFecha.ts` demasiado específico.
-   - Justificación: `etiquetaFecha(fecha)` ("Hoy"/"Ayer"/"20 de julio") es un util de **formateo de fecha reutilizable por sí solo** (podría formatear también el metadato de fecha de cada fila, no solo el encabezado de grupo). Un nombre genérico `useFechas` deja lugar a futuros helpers de fecha sin crear un archivo por función. Sigue el patrón "funciones puras exportadas a nivel de módulo".
-2. **`combinarUltimosMovimientos` → dentro de `useDashboard.ts`** (export a nivel de módulo). NO en `useFechas.ts`.
-   - Justificación: es lógica **de dominio del Dashboard**: conoce las formas `Gasto`/`Ingreso`, produce el tipo unificado, y opera sobre `filas` + `filasIngresos`, las dos fuentes que `useDashboard` ya combina para el balance (`cargarBalancePorMoneda` ya mezcla gastos+ingresos). Ponerla en el composable de fechas acoplaría un helper genérico a dos tipos de dominio ajenos. El orden desc lo hace ella (mezcla dos arrays), no `agruparPorFecha`.
-3. **Tipo unificado `MovimientoUnificado`** (`{ tipo: 'gasto' | 'ingreso'; fecha; monto; descripcion; moneda; id }`) → exportado desde `useDashboard.ts` junto a la función (es su tipo de retorno; no amerita tocar `types/`).
-4. **Widget → nuevo presentacional `src/components/UltimosMovimientos.vue`** (prop `movimientos: MovimientoUnificado[]`, renderiza lista + filas, formatea monto/color/fecha internamente vía `useMoneda`+`useFechas`). Sigue el patrón de `ListaGastoPorCategoria`, mantiene `DashboardView` delgado. No hace falta un `FilaMovimiento.vue` aparte: la fila solo se usa aquí.
-5. **Link "Ver todos": OMITIDO.** No existe vista combinada de movimientos y el task prohíbe inventar ruta. Widget sin enlace de navegación (decisión explícita).
-6. **Posición del widget:** en `DashboardView`, **después de `<section class="seccion-resumen">` (3 tarjetas) y antes de `.selector-moneda-dashboard`**. UX: los totales del mes se leen primero (macro), y "últimos movimientos" es el vistazo rápido inmediato; queda por encima de los gráficos (análisis más profundo). El widget es independiente del `ToggleMoneda` (cada movimiento en su propia moneda), por eso va antes del toggle.
+- **Cuatro decisiones de diseño que declaro explícitamente (ninguna es GATE 1, pero conviene fijarlas antes de construir):**
+  1. **Dónde vive el estado de `metas_ahorro`.** Es una fila única de solo-lectura para esta vista. Precedente `useDashboard` (mantiene `ref` locales y NO escribe la lista al store para no acoplar). **Elegido:** `useMetasAhorro()` expone un `ref<MetaAhorro | null>` local + `cargarMeta()`; la vista lo consume. NO añadir campo al `useGastosStore` (dominio distinto). Usar `cargando`/`error` de… → ver decisión 4.
+  2. **La fila expandible NO debe forzarse dentro de un `<table>` semántico.** `TablaMovimientos` es una tabla de datos legítima; una fila-disclosure con `aria-expanded` + `Enter/Espacio` no mapea limpio a `<tr>`. **Elegido:** componente `FilaCategoriaPresupuesto.vue` con un `<button>` (o `<div role="button" tabindex="0">`) como cabecera de fila (`aria-expanded`, `aria-controls` al panel del desglose), y **reutilizar el enfoque visual** de colapso de `TablaMovimientos` (etiqueta/valor apilados en <640px) — no su marcado `<table>`. El desglose expandido: grid 4 columnas en desktop, **grid 2×2 en móvil** (no 4 columnas comprimidas ni scroll horizontal), como pide el brief.
+  3. **Alcance del toggle de moneda en las 4 stat cards.** El hero respeta la moneda (regla dura del brief). Para no mezclar PEN/USD (regla transversal), **todas** las derivaciones de la vista respetan `monedaSeleccionada`: "Proyección" usa el gastado de esa moneda; "Categorías excedidas" cuenta solo presupuestos de esa moneda con gastado(misma moneda) > límite; "Ahorro comprometido" es una sola meta sin moneda en la tabla (migración 009 no tiene columna `moneda`) → se muestra tal cual, **sin** forzarla a la moneda del toggle (declararlo: la meta es mono-moneda implícita del usuario). "Días sin gasto" cuenta días sin **ningún** gasto confirmado de esa moneda. Si el equipo prefiere que "Días sin gasto" sea agnóstico de moneda, es un cambio de una línea — se construye per-moneda por defecto para ser coherente con el resto.
+  4. **`cargando`/`error` de `useMetasAhorro`.** Para no crear un store nuevo por una fila, reutilizar `useGastosStore` solo para `establecerCargando`/`establecerError`/`limpiarError` (igual que `useDashboard`, que "solo usa el store para cargando/error"), y mantener el dato (`meta`) en un `ref` local del composable. Un array/fila vacía NO es error (mismo criterio que `cargarPresupuestos`).
 
 ## Archivos a crear/modificar
 
-**Chunk A — Feature 1 (agrupador). Independiente de B/C hasta el paso de vistas.**
-- `src/composables/useFechas.ts` — **crear** — exporta a nivel de módulo:
-  - `etiquetaFecha(fecha: string): string` → "Hoy" / "Ayer" / fecha larga `es-PE`. Construir `Date` con partes locales (`new Date(anio, mes-1, dia)`) para evitar desfase UTC; calcular "hoy"/"ayer" comparando strings `YYYY-MM-DD` derivados con `getFullYear/getMonth/getDate` (estilo `fechaDiaRelativo` de `useDashboard.ts`). Formato: `Intl.DateTimeFormat('es-PE', { day: 'numeric', month: 'long' })`; añadir `year: 'numeric'` solo si el año de la fecha ≠ año actual.
-  - `agruparPorFecha<T>(items: T[], obtenerFecha: (item: T) => string): Array<{ etiqueta: string; items: T[] }>` → agrupa consecutivos por día (`fecha.slice(0,10)`), preservando orden de entrada (NO reordena), etiqueta cada grupo con `etiquetaFecha`. Lista vacía → `[]`.
-- `src/composables/__tests__/useFechas.spec.ts` — **crear**.
+> Chunks independientes (paralelizables): **A** (datos meta ahorro) y **B** (lógica pura de presupuestos) no se solapan entre sí ni con la UI. **C** (componentes presentacionales) y **D** (vista) consumen A y B. Dentro de C, cada componente es un archivo aislado.
 
-**Chunk B — Feature 2 lógica. Independiente de A.**
-- `src/composables/useDashboard.ts` — **modificar** — añadir el tipo `MovimientoUnificado` y la función pura exportada `combinarUltimosMovimientos(gastos: Gasto[], ingresos: Ingreso[], limite = 5): MovimientoUnificado[]` (mapea gasto → `{ tipo:'gasto', fecha, monto: g.monto ?? 0, descripcion: g.descripcion ?? '', moneda, id }`, ingreso → `{ tipo:'ingreso', fecha, monto: i.importe, descripcion: i.concepto, moneda, id }`, concatena, ordena por `fecha` desc con desempate determinista (p. ej. por `id`), `slice(0, limite)`). Gastos confirmados nunca traen `monto`/`moneda` null, pero tipar defensivo.
-- `src/composables/__tests__/useDashboard.spec.ts` — **modificar** — nuevo describe para `combinarUltimosMovimientos`.
+### Chunk A — capa de datos `metas_ahorro` (independiente)
+- `src/types/gasto.ts` — **modificar** — añadir `export interface MetaAhorro { usuario_id: string; descripcion: string; monto: number; actualizado_en: string }` (espejo de migración 009). (O `src/types/metaAhorro.ts` nuevo si se prefiere un archivo por dominio; el proyecto tiene `gasto.ts`/`ingreso.ts`, así que un archivo propio es más consistente. **Recomendado:** `src/types/metaAhorro.ts`.)
+- `src/composables/useMetasAhorro.ts` — **crear** — sub-dominio patrón `useIngresos`/`useDashboard`:
+  - `meta = ref<MetaAhorro | null>(null)` (estado local).
+  - `cargarMeta(): Promise<boolean>` — `supabase.from('metas_ahorro').select().maybeSingle()` (fila única por RLS). `null` = sin meta configurada, **no es error** (CTA vacío). Usar `store.establecerCargando`/`establecerError`/`limpiarError` de `useGastosStore`.
+  - (Solo si el CTA "Configura tu meta" debe **guardar** desde esta vista → `guardarMeta(descripcion, monto)` con `upsert({ usuario_id, descripcion, monto }, { onConflict: 'usuario_id' })`. **Ver "Lo que no pude verificar":** el brief solo pide mostrar el valor + CTA; si el CTA solo navega/abre un modal ya existente en otra vista, `guardarMeta` queda fuera de alcance. Construir `cargarMeta` sí o sí; `guardarMeta` solo si el orquestador confirma que el alta de meta ocurre aquí.)
+- `src/composables/__tests__/useMetasAhorro.spec.ts` — **crear** — carga con fila / sin fila (`null`, no error) / error de Supabase → mensaje al store.
 
-**Chunk C — Feature 2 UI. Depende de B (tipo + función).**
-- `src/components/UltimosMovimientos.vue` — **crear** — presentacional puro. Prop `movimientos: MovimientoUnificado[]`. Por fila: indicador de tipo (icono/emoji o glifo con `aria-label`), `descripcion`, fecha vía `etiquetaFecha`, monto vía `useMoneda.formatearMonto` coloreado — rojo gasto (`--color-error`), verde ingreso (`--color-exito`). Estado vacío propio ("Aún no hay movimientos"). Sin link "Ver todos".
-- `src/components/__tests__/UltimosMovimientos.spec.ts` — **crear**.
-- `src/views/DashboardView.vue` — **modificar** — importar `combinarUltimosMovimientos`/`MovimientoUnificado` y `UltimosMovimientos.vue`; `computed` `ultimosMovimientos = combinarUltimosMovimientos(filas.value, filasIngresos.value, 5)`; insertar `<section>` con el widget tras `.seccion-resumen`.
-- `src/views/__tests__/DashboardView.spec.ts` — **modificar** — verificar render del widget con los últimos 5.
+### Chunk B — lógica pura de presupuestos (independiente, muy testeable)
+- `src/composables/usePresupuestos.ts` — **modificar** — añadir (todas exportadas y puras, salvo la acción de copiar):
+  - `numeroSemanaDelMes(dia)` y `calcularDesgloseSemanal(gastos, categoriaId, moneda, mesPrefijo)` + `interface DesgloseSemanal` — **exactamente** como los da el brief.
+  - `contarCategoriasExcedidas(presupuestos, gastos, moneda)` → `{ total: number; nombres?: never }`… mejor: devolver los `categoria_id` (o presupuestos) excedidos y que la vista resuelva nombres contra `store.categorias` (patrón `cargarGastoPorCategoria`). Excedida = `calcularGastado(gastos, presupuesto) > presupuesto.monto_limite`, solo presupuestos de `moneda`.
+  - `contarDiasSinGasto(gastos, moneda, mesPrefijo, diaActual)` → `{ sinGasto: number; transcurridos: number }`. Días 1..diaActual sin ningún gasto confirmado (de esa moneda) cuya `fecha` caiga ese día. Guardas: `diaActual` acotado a los días reales del mes.
+  - `copiarPresupuestosMesAnterior()` — **acción** (no pura): lee presupuestos del mes anterior, filtra las categorías que el mes actual **ya** tiene (no sobrescribe), inserta las faltantes con `mes = primerDiaMesActual()`, `usuario_id` de `useAuthStore`. Devuelve `true`/`false` + escribe al store (`agregarPresupuesto` por cada nueva, o recargar). Manejar `23505` por si hay carrera. Necesita saber los del mes anterior → siguiente punto.
+  - `cargarPresupuestosMesAnterior()` (o `contarPresupuestosMesAnterior`) — **acción** de solo-lectura: `.eq('mes', primerDiaMesRelativo(1))` para poder **deshabilitar** el botón "Copiar de [mes anterior]" cuando el mes anterior no tiene nada. Guardar en un `ref` local (NO en el store, es transitorio para el botón). Reusar aritmética de mes local como `primerDiaDeMesRelativo` de `useDashboard` (o extraer helper — ver Sugerencias; por defecto **duplicar la función local**, coherente con la decisión ya tomada en `useDashboard`).
+- `src/composables/__tests__/usePresupuestos.spec.ts` (o ampliar `usePresupuestos.riesgo.spec.ts`) — **crear/ampliar** — ver Plan de pruebas (bordes de semana, 0 en una semana, cambio de mes, moneda, excedidas, días sin gasto, copiar sin sobrescribir).
 
-**Chunk D — Feature 1 en vistas. Depende de A. D-Historial y D-Ingresos son chunks independientes entre sí (archivos distintos → paralelizables).**
-- `src/views/HistorialView.vue` — **modificar** — `computed` `gruposGastos = agruparPorFecha(gastosFiltrados.value, g => g.fecha)`; en el template, reemplazar la `<ul class="lista-gastos">` plana por un `v-for` de grupos: por grupo, un encabezado (`.encabezado-grupo-fecha` con `grupo.etiqueta`) + una `<ul>` con las filas de `grupo.items` (misma `fila-gasto` actual, sin cambios internos). Conservar intactos: filtros, `resumenGastos`, estados vacíos `sinGastos`/`sinResultadosPorFiltro`, guard `gastosFiltrados.length > 0`. Añadir estilo `.encabezado-grupo-fecha`.
-- `src/views/IngresosView.vue` — **modificar** — análogo: `gruposIngresos = agruparPorFecha(ingresosFiltrados.value, i => i.fecha)`; agrupar la `<ul class="lista-ingresos">`. Conservar desglose por banco, nota sin-banco, totalizador y estados vacíos.
-- `src/views/__tests__/HistorialView.spec.ts` / `IngresosView.spec.ts` (y sus `.integracion.spec.ts`) — **modificar/revisar** — actualizar asserts que asuman una única `<ul>` plana; añadir asserts de encabezados de grupo; verificar que los tests de integración siguen pasando.
+### Chunk C — componentes presentacionales (consumen props ya calculadas)
+- `src/components/HeroPresupuesto.vue` — **crear** — hero oscuro `#1a1a18` (tokens de `TarjetaKpi` variante balance). Props: `gastado`, `limite`, `moneda`, `ritmoEsperadoPct` (día/díasMes×100), `diaActual`. Muestra: % grande consumido, "S/ gastado / límite", barra de progreso (3 estados, mismo lenguaje que `TarjetaPresupuestoResumen`), "ritmo esperado al día X: Y%", y **"quedan S/Z"** o **"excedido en S/Y" en `--color-error`** cuando `gastado > limite`. A11y: % en blanco, no en el color de la barra. Presentacional puro.
+- `src/components/EstadoVacioCta.vue` — **crear** — componente/estilo base **compartido por los 3 CTA** (sin presupuestos → "Configura tu primer presupuesto"; sin meta → "Configura tu meta de ahorro"; sin mes anterior no aplica aquí, es un botón deshabilitado). Props: `mensaje`/`titulo` + label del botón; emite `accion` (o recibe destino). Regla transversal del brief: **mismo componente/estilo base** para los tres estados vacíos.
+- `src/components/TarjetaStatPresupuesto.vue` — **crear** (o reusar `TarjetaKpi` donde encaje) — las 4 stat cards en grid 2×2 (también a ~375px). `TarjetaKpi` sirve para "Proyección" y "Ahorro comprometido" (label + monto + subtítulo), pero **"Categorías excedidas" y "Días sin gasto" son conteos, no montos** (y "excedidas" lleva nombres debajo en `--color-error`, "días" lleva "de N transcurridos"). Recomendado: una tarjeta genérica `TarjetaStatPresupuesto` con slot/props para valor + nota + variante (número vs. monto vs. error), o 2 componentes pequeños. **Reusar `TarjetaKpi` para las 2 monetarias y una tarjeta nueva para las 2 de conteo** es la vía de menor invención. Las cards con estado vacío (Ahorro sin meta) renderizan `EstadoVacioCta` en su interior.
+- `src/components/FilaCategoriaPresupuesto.vue` — **crear** — fila-disclosure (decisión 2): cabecera con nombre de categoría (punto de color vía `useColorCategoria`, como `TarjetaPresupuesto`), gastado/límite, %, y barra; `<button>`/`role=button` con `aria-expanded`/`aria-controls`, operable con Enter/Espacio. Al expandir: panel con desglose semanal (4 cols desktop / 2×2 móvil) recibido por prop (`DesgloseSemanal[]`), y nota "N movimientos · te quedan S/X". Reusa el CSS de colapso etiqueta/valor de `TablaMovimientos` para <640px. Presentacional puro (recibe `desglose`, `movimientos`, `restante` ya calculados).
+- Specs de componente: `HeroPresupuesto.spec.ts`, `FilaCategoriaPresupuesto.spec.ts`, `EstadoVacioCta.spec.ts` (al menos hero: excedido vs. no excedido + color; fila: aria-expanded toggle + teclado + grid 2×2; CTA: emite acción).
+
+### Chunk D — vista (consume A, B, C)
+- `src/views/PresupuestosView.vue` — **reescribir** (reemplaza la lista simple actual). Estructura tipo `DashboardView`:
+  - `onMounted`: `cargarCategorias()`, `cargarGastos()`, `cargarPresupuestos()`, `cargarMeta()` (Chunk A), `cargarPresupuestosMesAnterior()` (Chunk B). En paralelo (el store cuenta `cargasEnVuelo`).
+  - Encabezado con título + `ToggleMoneda` (`mostrar-simbolo`) + botón "+ Nuevo presupuesto" (conserva `ModalPresupuesto`/`DialogoConfirmacion`, que siguen sirviendo para alta/edición/borrado por categoría — **no eliminar** esos componentes).
+  - `computed` de `monedaSeleccionada`: `gastadoTotal`/`limiteTotal` (suma de `store.presupuestos` de esa moneda + `calcularGastado`), `ritmoEsperadoPct`, hero props; las 4 stats (proyección vía `proyeccionCierreMes`, meta, excedidas, días sin gasto); lista de filas de categoría con su `calcularDesgloseSemanal`.
+  - Estados vacíos: sin presupuestos de la moneda → `EstadoVacioCta` "Configura tu primer presupuesto" (en vez de la lista); sin meta → CTA dentro de la stat card.
+  - Épica 17: botón "Copiar de [mes anterior]" (nombre del mes con `Intl.DateTimeFormat('es-PE',{month:'long'})`, patrón `mesFormateado` de `DashboardView`); **deshabilitado con `title`/texto** cuando el mes anterior no tiene presupuestos; al click → `copiarPresupuestosMesAnterior()`.
+  - Mantiene el banner `role="alert"` de `storeGastos.error`.
+- `src/views/__tests__/PresupuestosView.spec.ts` — **crear** — integración estubando `supabase.from` por tabla (`presupuestos` mes actual, `presupuestos` mes anterior, `gastos`, `categorias`, `metas_ahorro`). Ver Plan de pruebas.
+
+### Nota de regresión
+- `TarjetaPresupuesto.vue`, `TarjetaPresupuesto.spec.ts`, `TarjetaPresupuesto.riesgo.spec.ts`: **verificar si siguen usándose.** Si la nueva vista ya no monta `TarjetaPresupuesto` (la fila pasa a `FilaCategoriaPresupuesto`), decidir con el orquestador si se elimina o se conserva (podría seguir usándose en otro lado — confirmar por grep antes de borrar). Por defecto **conservar** para no romper specs verdes fuera de alcance. `TarjetaPresupuestoResumen.vue` es de Dashboard: **no tocar**.
 
 ## Plan de pruebas
 
-### `etiquetaFecha` / `agruparPorFecha` (`useFechas.spec.ts`)
-Fijar "hoy" con `vi.setSystemTime` (fecha determinista) para que hoy/ayer no dependan del reloj real.
-- **etiquetaFecha:**
-  - Hoy → "Hoy".
-  - Ayer → "Ayer".
-  - Ayer cruzando mes (hoy = día 1) → "Ayer" (valida aritmética local, no string).
-  - Fecha antigua **mismo año** → "20 de julio" (sin año).
-  - Fecha antigua **otro año** → incluye el año (ej. "20 de julio de 2024").
-  - Robustez TZ: `'2026-07-20'` NO cae al 19 (Date con partes locales; assert día = 20).
-- **agruparPorFecha:**
-  - Camino feliz: items de 3 días distintos ya ordenados desc → 3 grupos, etiquetas correctas, mismo orden.
-  - Todos el mismo día → 1 grupo con todos.
-  - Lista vacía → `[]`.
-  - No reordena: agrupa consecutivos tal cual los recibe (asume input ordenado).
-  - Genérico: funciona con `obtenerFecha` distinto (gasto.fecha vs ingreso.fecha) y con fechas que traen hora (`slice(0,10)`).
+**Camino feliz**
+- Con ≥1 presupuesto en la moneda activa: hero con % consumido, "gastado / límite", barra, "ritmo esperado al día X: Y%" y "quedan S/Z"; grid 2×2 de 4 stat cards; una fila por categoría.
+- Expandir una fila (click) muestra el desglose de 4 semanas (`calcularDesgloseSemanal`) y la nota "N movimientos · te quedan S/X".
+- "Proyección de cierre" reutiliza `proyeccionCierreMes` con nota "X% bajo/sobre presupuesto".
+- Épica 17: mes anterior CON presupuestos → botón "Copiar de [mes]" habilitado; al copiar, se crean solo las categorías que el mes actual **no** tenía (las existentes no se sobrescriben) y aparecen en la vista.
 
-### `combinarUltimosMovimientos` (`useDashboard.spec.ts`)
-- Orden correcto: mezcla gastos + ingresos por fecha desc, sin importar array de origen.
-- Empate de fecha (gasto e ingreso mismo día): ambos presentes, orden estable/determinista (assert reproducible).
-- Límite de 5: con >5 totales devuelve exactamente 5 (los más recientes).
-- Menos de 5: devuelve todos.
-- Solo gastos (ingresos vacío) → solo gastos ordenados.
-- Solo ingresos (gastos vacío) → solo ingresos.
-- Ambos vacíos → `[]`.
-- Mapeo de campos: `tipo` correcto, `descripcion` = `gasto.descripcion`/`ingreso.concepto`, `monto` = `gasto.monto`/`ingreso.importe`, moneda preservada.
+**Borde / error**
+- **Sin presupuestos este mes (en la moneda activa):** hero/lista se reemplazan por `EstadoVacioCta` "Configura tu primer presupuesto"; sin división por cero (límite 0 → % 0, patrón `TarjetaPresupuestoResumen`).
+- **Sin meta de ahorro:** `cargarMeta` → `null` (no error); la stat "Ahorro comprometido" muestra CTA "Configura tu meta de ahorro" (mismo componente base).
+- **Mes anterior sin presupuestos:** botón "Copiar" **deshabilitado** con `title`/texto explicando por qué; `copiarPresupuestosMesAnterior` no se dispara.
+- **Categoría con 0 en alguna semana:** `calcularDesgloseSemanal` devuelve `total: 0` en esa semana (no la omite); la celda muestra 0, no hueco.
+- **Excedido vs. no excedido:** `gastado > limite` → hero muestra "excedido en S/Y" en `--color-error` y barra en estado sobregiro; `gastado <= limite` → "quedan S/Z". Test del componente afirmando la clase/color.
+- **Categorías excedidas:** conteo correcto (solo moneda activa); con 0 excedidas → "0" sin nombres; con N → nombres debajo en `--color-error`.
+- **Días sin gasto:** días 1..diaActual sin gasto confirmado (moneda activa) contados; nota "de N transcurridos"; un día con ≥1 gasto no cuenta.
+- **Toggle de moneda:** cambiar PEN↔USD recalcula hero, stats, filas y desglose **sin mezclar** montos de la otra moneda (afirmar que un gasto USD no afecta el total PEN).
+- **Partición de semana (bordes):** día 1→semana 1, día 7→1, día 8→2, día 28→4, día 29/30/31→4 (`Math.min(4, ceil(dia/7))`). Gasto de otra categoría/otra moneda/otro mes → no suma.
+- **Copiar sin sobrescribir:** mes actual ya tiene categoría X y el anterior también → X no se duplica ni se pisa; solo se clonan las ausentes. Colisión `23505` en carrera → manejada sin romper.
+- **Responsive (~375px):** las 4 stats siguen en grid 2×2; el desglose semanal expandido en grid **2×2** (no 4 columnas comprimidas ni scroll horizontal); las filas colapsan a etiqueta/valor (patrón `TablaMovimientos`, breakpoint 640px). Ningún elemento provoca scroll horizontal del body.
+- **Accesibilidad de la fila expandible:** `aria-expanded` refleja el estado; Tab llega a la cabecera; Enter/Espacio la expanden/colapsan; `aria-controls` apunta al panel. Test con `trigger('keydown', {key:'Enter'})`.
+- **Errores de carga:** error de Supabase en cualquiera de las cargas → mensaje en el store (`role="alert"`), la vista no crashea (patrón existente).
 
-### `UltimosMovimientos.vue` (`UltimosMovimientos.spec.ts`)
-- Una fila por movimiento, en el orden recibido (no reordena).
-- Gasto → color rojo; ingreso → color verde.
-- Monto formateado según su propia moneda (PEN vs USD).
-- Fecha vía `etiquetaFecha` ("Hoy"/"Ayer"/larga).
-- Indicador de tipo accesible (aria-label o texto).
-- Prop vacía → estado vacío, sin filas.
-- Sin link "Ver todos".
+**Cobertura Gherkin**
+- El orquestador indica que ProductOwner cerró el ciclo pero **no adjuntó los escenarios Gherkin literales** en este brief (llegan las 3 épicas descritas). Cada bullet de "Borde/error" está mapeado 1:1 a un criterio de aceptación descrito (excedido/no excedido, estados vacíos, no-sobrescritura, partición de semana, no-mezcla de moneda, a11y de la fila). **Si el orquestador aporta el Gherkin exacto, mapear cada `Scenario` a uno de estos casos antes de construir; no debería aparecer ninguno nuevo, pero conviene verificarlo.**
 
-### Render en las 3 vistas
-- **HistorialView:** gastos en 2 días → 2 encabezados de grupo + filas correctas; totalizador y filtros siguen; estados vacíos `sinGastos`/`sinResultadosPorFiltro` intactos.
-- **IngresosView:** análogo; además desglose por banco y nota "sin banco" siguen presentes.
-- **DashboardView:** widget tras la fila de resumen y antes del toggle; hasta 5 movimientos mezclados; dashboard sin datos → estado vacío del widget.
+## Sugerencias fuera de alcance (NO entran al build sin aprobación)
+- Extraer un helper compartido de aritmética de meses (`primerDiaMesRelativo`) hoy duplicado entre `usePresupuestos` y `useDashboard`; ambos declaran a propósito no compartirlo. Refactor transversal → fuera de alcance de esta fase.
+- Alta/edición de la meta de ahorro desde esta vista (`guardarMeta`) si el CTA resulta ser solo un enlace/modal existente en otra pantalla.
+- Historial/comparativa de presupuestos de meses pasados (esta vista es del mes actual).
+- Persistir la última moneda elegida (hoy cada vista arranca en PEN).
 
-## Sugerencias fuera de alcance (NO incluidas en este build)
-- El metadato de fecha cruda por fila (`· {{ gasto.fecha }}`) queda redundante con el encabezado de grupo; podría quitarse o formatearse con `etiquetaFecha`. Cosmético, no pedido.
-- `etiquetaFecha` podría más adelante centralizar TODO el formateo de fecha de la app. Reemplazo global fuera de alcance.
+## Lo que no pude verificar / supuestos declarados
+- **No leí el Gherkin literal** (no vino en el brief). Ver "Cobertura Gherkin".
+- **CTA de la meta de ahorro:** el brief dice "Configura tu meta de ahorro" pero no si el alta ocurre en esta vista (modal nuevo) o en otra ya existente. Construir `cargarMeta` (mostrar/estado vacío) es seguro; `guardarMeta` queda condicionado a confirmación del orquestador. La migración 009 no tiene columna `moneda` → la meta es mono-moneda implícita (decisión 3).
+- **`store.gastos` = solo confirmados** lo tomo del comentario de `stores/gastos.ts` y del header de `useGastos.cargarGastos` (no releí el cuerpo de `cargarGastos`); si algún flujo mete no-confirmados en `store.gastos`, "días sin gasto"/desglose contarían de más — se asume el invariante documentado.
+- **No leí un mockup gráfico**, solo la descripción textual del brief; el detalle visual fino (tamaños, sombras, exacta jerarquía tipográfica del hero) queda a criterio del builder siguiendo tokens `--espacio-*`/`--color-*`/`--radio-*` y el lenguaje "Caudal" de las fases 1-3.
+- **`maybeSingle()` vs. `single()`+`PGRST116`** para `metas_ahorro`: asumo `maybeSingle()` (fila única, ausencia = `null` sin error); si el proyecto estandarizó `single()`+tratar `PGRST116`, seguir esa convención (así lo hace `useBandeja`/`cargarEstadoIngesta`).

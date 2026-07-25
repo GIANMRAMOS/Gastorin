@@ -56,4 +56,30 @@ describe('ListaGastoPorCategoria (HU-7.2)', () => {
     expect(wrapper.find('.mensaje-vacio-seccion').text()).toBe('Sin gastos este mes.')
     expect(wrapper.findAll('.item-categoria')).toHaveLength(0)
   })
+
+  it('regresión (QA, bug encontrado y corregido): una categoría con total NEGATIVO (Épica 11 permite ingresos negativos) no debe producir un ancho de barra inválido/negativo', () => {
+    // Este componente se reutiliza en IngresosView (ver src/views/IngresosView.vue,
+    // sidebar "Por categoría"), donde los ítems SÍ pueden tener total negativo
+    // (una categoría de ingreso con más correcciones/reversos que altas).
+    // Antes del fix, `anchoBarra` calculaba `(total / totalMaximo) * 100` sin
+    // clampear a 0, así que un total negativo daba un porcentaje negativo (ej.
+    // -50%). `width` no admite valores negativos: el navegador (y jsdom)
+    // descarta la propiedad en silencio, y la barra queda SIN `width` inline,
+    // ocupando el 100% del contenedor por el flujo de bloque por defecto —
+    // visualmente idéntica a la barra del total MÁXIMO.
+    const wrapper = mount(ListaGastoPorCategoria, {
+      props: {
+        items: [
+          { categoria_id: 'sueldo', nombre: 'Sueldo', total: 100 },
+          { categoria_id: 'reembolsos', nombre: 'Reembolsos', total: -50 },
+        ],
+        moneda: 'PEN',
+      },
+    })
+
+    const barras = wrapper.findAll('.barra-categoria')
+    const estiloReembolsos = barras[1].attributes('style') ?? ''
+    expect(estiloReembolsos).toContain('width: 0%')
+    expect(estiloReembolsos).not.toContain('width: -')
+  })
 })

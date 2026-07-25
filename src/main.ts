@@ -1,6 +1,16 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 
+// Fuentes "Caudal" (self-hosted vía @fontsource, sin depender de un CDN
+// externo): pesos exactamente iguales a los que ya usa la hoja de estilos
+// (400/600/700/800 para texto, 400/600/700 para montos en fuente mono).
+import '@fontsource/dm-sans/400.css'
+import '@fontsource/dm-sans/600.css'
+import '@fontsource/dm-sans/700.css'
+import '@fontsource/dm-sans/800.css'
+import '@fontsource/ibm-plex-mono/400.css'
+import '@fontsource/ibm-plex-mono/600.css'
+import '@fontsource/ibm-plex-mono/700.css'
 import '@/assets/estilos-base.css'
 import App from './App.vue'
 import router from './router'

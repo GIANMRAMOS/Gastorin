@@ -10,6 +10,7 @@ import { useGastosStore } from '@/stores/gastos'
 import { useVersion } from '@/composables/useVersion'
 import { supabase } from '@/lib/supabaseClient'
 import { crearConstructorConsulta } from '@/lib/__mocks__/supabaseClient'
+import type { Gasto } from '@/types/gasto'
 
 // HU-9.1 — se mockea `useVersion` para controlar `textoVersion`/`commitCompleto`
 // por caso sin depender de las constantes de build reales.
@@ -63,6 +64,8 @@ async function montarShell() {
       { path: '/presupuestos', name: 'presupuestos', component: { template: '<div>Presupuestos</div>' } },
       { path: '/ingresos', name: 'ingresos', component: { template: '<div>Ingresos</div>' } },
       { path: '/bancos', name: 'bancos', component: { template: '<div>Bancos</div>' } },
+      { path: '/graficos', name: 'graficos', component: { template: '<div>Gráficos</div>' } },
+      { path: '/maestros', name: 'maestros', component: { template: '<div>Maestros</div>' } },
     ],
   })
   router.push('/')
@@ -155,22 +158,34 @@ describe('AppShellLayout — orden de menú (Épica 11, ajuste de alcance)', () 
     wrapperActivo = null
   })
 
-  it('sidebar de escritorio: orden exacto Dashboard, Egresos, Ingresos, Bandeja, Presupuestos, Categorías, Bancos (sin botones de registro)', async () => {
+  it('sidebar de escritorio: orden exacto Caudal Dashboard, Ingresos, Egresos, Bandeja, Presupuesto, Gráficos, Maestros + grupo transitorio Categorías, Bancos', async () => {
     const wrapper = await montarShell()
     const nav = wrapper.find('nav.navegacion')
     const items = nav.findAll('.item-nav')
 
     expect(items.map((i) => i.text())).toEqual([
       'Dashboard',
-      'Egresos',
       'Ingresos',
+      'Egresos',
       'Bandeja',
-      'Presupuestos',
+      'Presupuesto',
+      'Gráficos',
+      'Maestros',
       'Categorías',
       'Bancos',
     ])
     // La ruta interna sigue llamándose "historial"; solo cambió el texto visible a "Egresos".
-    expect(nav.findAll('.item-nav')[1].attributes('href')).toBe('/historial')
+    expect(nav.findAll('.item-nav')[2].attributes('href')).toBe('/historial')
+    // Gráficos/Maestros son rutas stub (GATE1-#1): ningún enlace muerto.
+    expect(nav.findAll('.item-nav')[5].attributes('href')).toBe('/graficos')
+    expect(nav.findAll('.item-nav')[6].attributes('href')).toBe('/maestros')
+  })
+
+  it('sidebar de escritorio: hay un divisor sutil entre el grupo principal y el grupo transitorio (Categorías/Bancos)', async () => {
+    const wrapper = await montarShell()
+    const nav = wrapper.find('nav.navegacion')
+
+    expect(nav.find('.separador-nav').exists()).toBe(true)
   })
 
   it('el sidebar YA NO contiene botones "Registrar gasto"/"Registrar ingreso"', async () => {
@@ -194,17 +209,19 @@ describe('AppShellLayout — orden de menú (Épica 11, ajuste de alcance)', () 
     expect(wrapper.findComponent({ name: 'ModalGasto' }).exists()).toBe(true)
   })
 
-  it('bottom nav móvil: mismas rutas en el mismo orden relativo (Dashboard, Egresos, Ingresos, Bandeja, Presupuestos, Categorías, Bancos), con FAB y Salir al final', async () => {
+  it('bottom nav móvil: mismas rutas en el mismo orden Caudal (Dashboard, Ingresos, Egresos, Bandeja, Presupuesto, Gráficos, Maestros, Categorías, Bancos), con FAB y Salir al final', async () => {
     const wrapper = await montarShell()
     const bottomNav = wrapper.find('nav.navegacion-inferior')
     const enlaces = bottomNav.findAll('a.item-nav-movil')
 
     expect(enlaces.map((e) => e.text())).toEqual([
       'Dashboard',
-      'Egresos',
       'Ingresos',
+      'Egresos',
       'Bandeja',
-      'Presupuestos',
+      'Presupuesto',
+      'Gráficos',
+      'Maestros',
       'Categorías',
       'Bancos',
     ])
@@ -343,6 +360,7 @@ describe('AppShellLayout — fix: bancos/categorías se cargan al montar el shel
     id: 'c1',
     usuario_id: 'u1',
     nombre: 'Comida',
+    tipo: 'gasto',
     predefinida: false,
     activa: true,
     creado_en: '',
@@ -439,5 +457,200 @@ describe('AppShellLayout — fix: bancos/categorías se cargan al montar el shel
 
     expect(llamadasBancos).toHaveLength(1)
     expect(llamadasCategorias).toHaveLength(1)
+  })
+})
+
+/** Gasto mínimo válido, para no repetir todos los campos en cada test de esta sección. */
+function borradorFalso(datos: Partial<Pick<Gasto, 'id' | 'monto' | 'moneda'>> = {}): Gasto {
+  return {
+    id: datos.id ?? 'b1',
+    usuario_id: 'u1',
+    categoria_id: 'c1',
+    banco_id: 'bc1',
+    monto: datos.monto ?? 10,
+    moneda: datos.moneda ?? 'PEN',
+    fecha: '2026-07-01',
+    descripcion: null,
+    origen: 'correo',
+    estado: 'borrador',
+    gmail_message_id: null,
+    gmail_fragmento: null,
+    creado_en: '',
+    actualizado_en: '',
+  }
+}
+
+describe('AppShellLayout — badge de Bandeja (Fase 1 "Caudal")', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    wrapperActivo?.unmount()
+    wrapperActivo = null
+  })
+
+  it('con cantidadBorradores > 0, el badge aparece con el número (sidebar y bottom nav)', async () => {
+    const wrapper = await montarShell()
+    const storeGastos = useGastosStore()
+    storeGastos.establecerBorradores([borradorFalso({ id: 'b1' }), borradorFalso({ id: 'b2' })])
+    await wrapper.vm.$nextTick()
+
+    const badges = wrapper.findAll('.insignia-nav')
+    expect(badges.length).toBeGreaterThan(0)
+    expect(badges[0].text()).toBe('2')
+  })
+
+  it('con cantidadBorradores === 0, el badge no se renderiza', async () => {
+    const wrapper = await montarShell()
+
+    expect(wrapper.find('.insignia-nav').exists()).toBe(false)
+  })
+
+  it('regresión: el shell hidrata los borradores por sí mismo (deep-link/refresh fuera de Dashboard/Bandeja), no solo cuando esas vistas los cargan', async () => {
+    // Antes del fix, `cantidadBorradores` dependía de que `DashboardView` o
+    // `BandejaView` llamaran a `cargarBorradores()` en su propio `onMounted`;
+    // si el usuario entraba por cualquier otra ruta (deep-link o refresh en
+    // `/presupuestos`, por ejemplo), el shell nunca pedía los borradores y el
+    // badge mostraba 0 aunque existieran en BD. Aquí se fuerza ese escenario:
+    // ninguna vista real está montada, solo el shell — el fetch debe venir de
+    // `AppShellLayout` mismo.
+    fromMock.mockImplementation((tabla: string) => {
+      const builder = crearConstructorConsulta()
+      if (tabla === 'gastos') {
+        ;(builder.order as Mock).mockResolvedValue({
+          data: [borradorFalso({ id: 'b1' }), borradorFalso({ id: 'b2' })],
+          error: null,
+        })
+      } else {
+        ;(builder.order as Mock).mockResolvedValue({ data: [], error: null })
+      }
+      return builder
+    })
+
+    const wrapper = await montarShell()
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const badges = wrapper.findAll('.insignia-nav')
+    expect(badges.length).toBeGreaterThan(0)
+    expect(badges[0].text()).toBe('2')
+  })
+})
+
+describe('AppShellLayout — card "Proyección {mes}" del sidebar (GATE1-#3: fetch propio, visible en toda ruta)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 6, 15)) // 15 jul 2026: día 15 de 31 (julio)
+  })
+
+  afterEach(() => {
+    wrapperActivo?.unmount()
+    wrapperActivo = null
+    vi.useRealTimers()
+  })
+
+  it('camino feliz: con gastos y presupuesto del mes (datos reales mockeados), renderiza el monto proyectado (mono) y una nota con el % sobre el presupuesto', async () => {
+    fromMock.mockImplementation((tabla: string) => {
+      const builder = crearConstructorConsulta()
+      if (tabla === 'gastos') {
+        ;(builder.order as Mock).mockResolvedValue({
+          data: [{ id: 'g1', monto: 150, moneda: 'PEN', fecha: '2026-07-05', estado: 'confirmado' }],
+          error: null,
+        })
+        return builder
+      }
+      if (tabla === 'presupuestos') {
+        ;(builder.eq as Mock).mockResolvedValue({
+          data: [
+            {
+              id: 'p1',
+              usuario_id: 'u1',
+              categoria_id: 'c1',
+              mes: '2026-07-01',
+              moneda: 'PEN',
+              monto_limite: 300,
+              creado_en: '',
+            },
+          ],
+          error: null,
+        })
+        return builder
+      }
+      ;(builder.order as Mock).mockResolvedValue({ data: [], error: null })
+      return builder
+    })
+
+    const wrapper = await montarShell()
+    // Con fake timers activos, la `flushPromises` local (basada en
+    // `setTimeout`) nunca dispararía: se usa el avance explícito de Vitest,
+    // que fluye timers Y microtasks pendientes (las promesas resueltas del
+    // mock de Supabase).
+    await vi.advanceTimersByTimeAsync(0)
+    await wrapper.vm.$nextTick()
+
+    const card = wrapper.find('.tarjeta-proyeccion')
+    expect(card.exists()).toBe(true)
+    // 150 gastado / día 15 * 31 días = 310.
+    expect(card.find('.monto-proyeccion').text()).toContain('310.00')
+    // 310 / 300 (límite) * 100 ≈ 103%.
+    expect(card.find('.nota-proyeccion').text()).toContain('103%')
+  })
+
+  it('borde: sin gastos del mes ni presupuesto configurado, la proyección es 0 sin NaN/Infinity y la nota degrada a un texto genérico', async () => {
+    // El mock por defecto del `beforeEach` global ya devuelve listas vacías para todas las tablas.
+    const wrapper = await montarShell()
+    await vi.advanceTimersByTimeAsync(0)
+    await wrapper.vm.$nextTick()
+
+    const monto = wrapper.find('.monto-proyeccion').text()
+    expect(monto).not.toContain('NaN')
+    expect(monto).not.toContain('Infinity')
+    expect(wrapper.find('.nota-proyeccion').text()).toBe('Estimado de cierre de mes')
+  })
+})
+
+describe('AppShellLayout — hoja de acciones mediada por useUiStore (GATE1-#2)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    wrapperActivo?.unmount()
+    wrapperActivo = null
+  })
+
+  it('cuando otra vista (ej. el "+ Registrar" del header) llama a storeUi.abrirHojaAcciones(), el shell monta HojaAccionesFab', async () => {
+    const wrapper = await montarShell()
+    const storeUi = useUiStore()
+
+    expect(wrapper.findComponent({ name: 'HojaAccionesFab' }).exists()).toBe(false)
+
+    storeUi.abrirHojaAcciones()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findComponent({ name: 'HojaAccionesFab' }).exists()).toBe(true)
+  })
+
+  it('cerrar la hoja (botón "Cancelar") deja storeUi.hojaAccionesAbierta en false', async () => {
+    const wrapper = await montarShell()
+    const storeUi = useUiStore()
+    storeUi.abrirHojaAcciones()
+    await wrapper.vm.$nextTick()
+
+    await wrapper.find('.boton-cancelar-hoja').trigger('click')
+
+    expect(storeUi.hojaAccionesAbierta).toBe(false)
+  })
+
+  it('regresión: el FAB móvil sigue abriendo la misma hoja vía el store', async () => {
+    const wrapper = await montarShell()
+    const storeUi = useUiStore()
+
+    await wrapper.find('.boton-fab').trigger('click')
+
+    expect(storeUi.hojaAccionesAbierta).toBe(true)
+    expect(wrapper.findComponent({ name: 'HojaAccionesFab' }).exists()).toBe(true)
   })
 })
