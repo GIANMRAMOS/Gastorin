@@ -17,6 +17,7 @@ import { supabase } from '@/lib/supabaseClient'
 import { crearConstructorConsulta } from '@/lib/__mocks__/supabaseClient'
 import type { Gasto } from '@/types/gasto'
 import type { Banco, Ingreso } from '@/types/ingreso'
+import type { AjusteSaldoCuenta } from '@/types/ajusteSaldo'
 
 function bancoDe(datos: Partial<Banco>): Banco {
   return {
@@ -442,6 +443,89 @@ describe('useDashboard', () => {
       const saldos = calcularSaldoNetoPorCuenta([bancoDe({ id: 'b1', nombre: 'Otro banco' })], [], [])
 
       expect(saldos).toEqual([])
+    })
+
+    describe('con ajustes de saldo (migración 011, "setear saldo de cuenta")', () => {
+      function ajusteDe(datos: Partial<AjusteSaldoCuenta>): AjusteSaldoCuenta {
+        return {
+          id: `aj-${Math.random()}`,
+          usuario_id: 'u1',
+          banco_id: 'b1',
+          moneda: 'PEN',
+          saldo: 1000,
+          fecha: '2026-07-01',
+          creado_en: '2026-07-01T10:00:00Z',
+          ...datos,
+        }
+      }
+
+      it('camino feliz: saldo = ajuste.saldo + ingresos - gastos POSTERIORES a la fecha del ajuste', () => {
+        const bancos = [bancoDe({ id: 'b1', nombre: 'BCP' })]
+        const gastos = [gastoDe({ banco_id: 'b1', moneda: 'PEN', monto: 100, fecha: '2026-07-10' })]
+        const ingresos = [ingresoDe({ banco_id: 'b1', moneda: 'PEN', importe: 200, fecha: '2026-07-15' })]
+        const ajustes = [ajusteDe({ saldo: 1000, fecha: '2026-07-01' })]
+
+        const saldos = calcularSaldoNetoPorCuenta(bancos, gastos, ingresos, ajustes)
+
+        expect(saldos[0].saldoPen).toBe(1100) // 1000 + 200 - 100
+      })
+
+      it('borde clave: movimientos ANTERIORES o en la MISMA fecha del ajuste NO se restan/suman (ya están reflejados en el saldo seteado)', () => {
+        const bancos = [bancoDe({ id: 'b1', nombre: 'BCP' })]
+        const gastos = [gastoDe({ banco_id: 'b1', moneda: 'PEN', monto: 9999, fecha: '2026-07-01' })]
+        const ingresos = [ingresoDe({ banco_id: 'b1', moneda: 'PEN', importe: 9999, fecha: '2026-06-15' })]
+        const ajustes = [ajusteDe({ saldo: 1000, fecha: '2026-07-01' })]
+
+        const saldos = calcularSaldoNetoPorCuenta(bancos, gastos, ingresos, ajustes)
+
+        expect(saldos[0].saldoPen).toBe(1000)
+      })
+
+      it('"el último ajuste" gobierna: con dos ajustes de la misma cuenta, se usa el de fecha más reciente, no el primero', () => {
+        const bancos = [bancoDe({ id: 'b1', nombre: 'BCP' })]
+        const gastos = [gastoDe({ banco_id: 'b1', moneda: 'PEN', monto: 100, fecha: '2026-07-20' })]
+        const ajustes = [
+          ajusteDe({ id: 'viejo', saldo: 1000, fecha: '2026-07-01' }),
+          ajusteDe({ id: 'nuevo', saldo: 5000, fecha: '2026-07-15' }),
+        ]
+
+        const saldos = calcularSaldoNetoPorCuenta(bancos, [], [], ajustes)
+        const saldosConGasto = calcularSaldoNetoPorCuenta(bancos, gastos, [], ajustes)
+
+        expect(saldos[0].saldoPen).toBe(5000) // el ajuste "nuevo", no "viejo"
+        expect(saldosConGasto[0].saldoPen).toBe(4900) // 5000 - 100 (después del 15, no del 1)
+      })
+
+      it('sin ningún ajuste para una cuenta, se comporta como antes (suma desde el historial completo)', () => {
+        const bancos = [bancoDe({ id: 'b1', nombre: 'BCP' })]
+        const ingresos = [ingresoDe({ banco_id: 'b1', moneda: 'PEN', importe: 500, fecha: '2020-01-01' })]
+
+        const saldos = calcularSaldoNetoPorCuenta(bancos, [], ingresos, [])
+
+        expect(saldos[0].saldoPen).toBe(500)
+      })
+
+      it('borde: un ajuste en USD hace que saldoUsd deje de ser `null` aunque no haya movimientos en esa moneda', () => {
+        const bancos = [bancoDe({ id: 'b1', nombre: 'BCP' })]
+        const ajustes = [ajusteDe({ moneda: 'USD', saldo: 200, fecha: '2026-07-01' })]
+
+        const saldos = calcularSaldoNetoPorCuenta(bancos, [], [], ajustes)
+
+        expect(saldos[0].saldoUsd).toBe(200)
+      })
+
+      it('los ajustes de PEN y USD de la misma cuenta se resuelven de forma independiente, nunca se mezclan', () => {
+        const bancos = [bancoDe({ id: 'b1', nombre: 'BCP' })]
+        const ajustes = [
+          ajusteDe({ moneda: 'PEN', saldo: 1000, fecha: '2026-07-01' }),
+          ajusteDe({ moneda: 'USD', saldo: 50, fecha: '2026-07-01' }),
+        ]
+
+        const saldos = calcularSaldoNetoPorCuenta(bancos, [], [], ajustes)
+
+        expect(saldos[0].saldoPen).toBe(1000)
+        expect(saldos[0].saldoUsd).toBe(50)
+      })
     })
   })
 

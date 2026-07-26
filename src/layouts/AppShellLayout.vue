@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ModalGasto from '@/components/ModalGasto.vue'
 import ModalIngreso from '@/components/ModalIngreso.vue'
@@ -138,9 +138,17 @@ function cerrarModalGasto() {
   modalGastoAbierto.value = false
 }
 
-/** Tras guardar el gasto, cierra el modal (la lista se refresca sola vía store). */
+/**
+ * Tras guardar el gasto, cierra el modal. Las vistas que leen directo del
+ * store (Egresos/Ingresos) ya se refrescan solas por reactividad; las que
+ * mantienen su propia copia local (Dashboard, la card "Proyección" de este
+ * mismo shell) necesitan la señal de `notificarRegistro` para pedir sus
+ * datos de nuevo — sin esto, registrar un gasto desde el FAB sin cambiar de
+ * página dejaba el Dashboard con cifras desactualizadas.
+ */
 function manejarGuardadoGasto() {
   modalGastoAbierto.value = false
+  storeUi.notificarRegistro()
 }
 
 /** Cierra el modal de alta de ingreso sin guardar. */
@@ -148,9 +156,10 @@ function cerrarModalIngreso() {
   modalIngresoAbierto.value = false
 }
 
-/** Tras guardar el ingreso, cierra el modal (la lista se refresca sola vía store). */
+/** Tras guardar el ingreso, cierra el modal y notifica (mismo motivo que `manejarGuardadoGasto`). */
 function manejarGuardadoIngreso() {
   modalIngresoAbierto.value = false
+  storeUi.notificarRegistro()
 }
 
 /** Abre la hoja de acciones (FAB móvil o "+ Registrar" de cualquier vista, vía `useUiStore`). */
@@ -221,6 +230,18 @@ onMounted(() => {
   cargarPresupuestos()
   cargarBorradores()
 })
+
+/**
+ * La card "Proyección" hace su propio fetch (GATE1-#3), desacoplado del
+ * store: un gasto confirmado desde el FAB no la actualiza por sí solo. Se
+ * vuelve a pedir cada vez que `notificarRegistro` sube (ver `stores/ui.ts`).
+ */
+watch(
+  () => storeUi.contadorRegistro,
+  () => {
+    cargarGastosDelMesShell()
+  },
+)
 </script>
 
 <template>

@@ -16,12 +16,18 @@ const props = defineProps<{
   cuentas: SaldoCuenta[]
 }>()
 
+const emit = defineEmits<{
+  /** El usuario tocó una cuenta para setear su saldo (abre `ModalAjusteSaldo` en `DashboardView`). */
+  'editar-cuenta': [{ bancoId: string; moneda: Moneda; etiqueta: string }]
+}>()
+
 const { formatearMonto } = useMoneda()
 
 const sinCuentas = computed(() => props.cuentas.length === 0)
 
 interface TileCuenta {
   key: string
+  bancoId: string
   etiqueta: string
   monto: number
   moneda: Moneda
@@ -51,6 +57,7 @@ const tiles = computed<TileCuenta[]>(() =>
     if (esCuentaEnDolares(cuenta.nombreBanco)) {
       return {
         key: cuenta.bancoId,
+        bancoId: cuenta.bancoId,
         etiqueta: etiquetaCuenta(cuenta.nombreBanco),
         monto: cuenta.saldoUsd ?? 0,
         moneda: 'USD' as Moneda,
@@ -59,6 +66,7 @@ const tiles = computed<TileCuenta[]>(() =>
     }
     return {
       key: cuenta.bancoId,
+      bancoId: cuenta.bancoId,
       etiqueta: etiquetaCuenta(cuenta.nombreBanco),
       monto: cuenta.saldoPen,
       moneda: 'PEN' as Moneda,
@@ -77,7 +85,14 @@ const tiles = computed<TileCuenta[]>(() =>
     </p>
 
     <div v-else class="grid-saldos-cuenta">
-      <div v-for="tile in tiles" :key="tile.key" class="tile-saldo-cuenta">
+      <button
+        v-for="tile in tiles"
+        :key="tile.key"
+        type="button"
+        class="tile-saldo-cuenta"
+        :title="`Setear saldo de ${tile.etiqueta}`"
+        @click="emit('editar-cuenta', { bancoId: tile.bancoId, moneda: tile.moneda, etiqueta: tile.etiqueta })"
+      >
         <p class="nombre-cuenta">{{ tile.etiqueta }}</p>
         <p class="monto-saldo-cuenta" :class="tile.monto < 0 ? 'saldo-negativo' : 'saldo-positivo'">
           {{ formatearMonto(tile.monto, tile.moneda) }}
@@ -85,7 +100,7 @@ const tiles = computed<TileCuenta[]>(() =>
         <p v-if="tile.secundario" class="saldo-secundario-cuenta">
           {{ formatearMonto(tile.secundario.monto, tile.secundario.moneda) }}
         </p>
-      </div>
+      </button>
     </div>
   </article>
 </template>
@@ -123,12 +138,25 @@ const tiles = computed<TileCuenta[]>(() =>
 
 .tile-saldo-cuenta {
   background: var(--color-fondo-app);
+  border: none;
   border-radius: 10px;
   padding: var(--espacio-3) var(--espacio-2);
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 4px;
   min-width: 0;
+  width: 100%;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.tile-saldo-cuenta:hover {
+  background: var(--color-borde-tarjeta);
+}
+.tile-saldo-cuenta:focus-visible {
+  outline: 2px solid var(--color-borde-foco);
+  outline-offset: 2px;
 }
 
 .nombre-cuenta {

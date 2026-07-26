@@ -431,11 +431,14 @@ describe('DashboardView (rediseño "Caudal", Fase 1: Shell + Dashboard)', () => 
 
     // La tendencia diaria es una agregación pura sobre `filas.value` (ya
     // cargada por `cargarDatosDashboard`): no agrega NINGUNA llamada a `from`
-    // propia. Las 4 tablas de abajo son las del `onMounted` de "Dashboard"
-    // (categorías, gastos, ingresos, presupuestos) + una segunda consulta a
-    // 'gastos' de `cargarBorradores` (filtro distinto, ver siguiente test).
+    // propia. Las tablas de abajo son las del `onMounted` de "Dashboard"
+    // (categorías, gastos, ingresos, presupuestos, ajustes_saldo_cuenta) +
+    // una segunda consulta a 'gastos' de `cargarBorradores` (filtro distinto,
+    // ver siguiente test).
     const tablasConsultadas = fromMock.mock.calls.map(([tabla]) => tabla)
-    expect(new Set(tablasConsultadas)).toEqual(new Set(['categorias', 'gastos', 'ingresos', 'presupuestos']))
+    expect(new Set(tablasConsultadas)).toEqual(
+      new Set(['categorias', 'gastos', 'ingresos', 'presupuestos', 'ajustes_saldo_cuenta']),
+    )
   })
 
   it('Fase 1 "Caudal": onMounted también hidrata presupuestos (Épica 6) y borradores de bandeja (Épica 5)', async () => {
@@ -802,5 +805,69 @@ describe('DashboardView (rediseño "Caudal", Fase 1: Shell + Dashboard)', () => 
       id: string
     }>
     expect(feedMovs.map((m) => m.id)).toEqual(['g-usd'])
+  })
+
+  it('regresión: registrar un gasto/ingreso desde el FAB (fuera de esta vista) vuelve a pedir cargarDatosDashboard vía storeUi.contadorRegistro', async () => {
+    // Antes del fix, `filas`/`filasIngresos` (copia local de useDashboard) solo
+    // se cargaban en el `onMounted` de esta vista: guardar un gasto desde el
+    // FAB (montado en AppShellLayout, fuera del árbol de esta vista) no las
+    // actualizaba, dejando KPIs/"Saldo por cuenta"/feed desactualizados sin
+    // navegar fuera y volver.
+    prepararCargaInicial([categoriaComida], [gastoDe({ moneda: 'PEN', fecha: '2026-07-05', monto: 100 })])
+
+    const wrapper = mount(DashboardView, { global: { plugins: [crearRouterDePrueba()] } })
+    await flushPromises()
+    await wrapper.vm.$nextTick()
+
+    const llamadasGastosAntes = fromMock.mock.calls.filter(([tabla]) => tabla === 'gastos').length
+
+    const storeUi = useUiStore()
+    storeUi.notificarRegistro()
+    await flushPromises()
+
+    const llamadasGastosDespues = fromMock.mock.calls.filter(([tabla]) => tabla === 'gastos').length
+    expect(llamadasGastosDespues).toBeGreaterThan(llamadasGastosAntes)
+  })
+
+  describe('Setear saldo de cuenta (migración 011)', () => {
+    it('tocar una cuenta en "Saldo por cuenta" abre ModalAjusteSaldo con el bancoId/moneda/etiqueta correctos', async () => {
+      prepararCargaInicial([categoriaComida], [])
+
+      const wrapper = mount(DashboardView, { global: { plugins: [crearRouterDePrueba()] } })
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.findComponent({ name: 'ModalAjusteSaldo' }).exists()).toBe(false)
+
+      await wrapper
+        .findComponent({ name: 'TarjetaSaldosPorCuenta' })
+        .vm.$emit('editar-cuenta', { bancoId: 'b1', moneda: 'PEN', etiqueta: 'BCP' })
+      await wrapper.vm.$nextTick()
+
+      const modal = wrapper.findComponent({ name: 'ModalAjusteSaldo' })
+      expect(modal.exists()).toBe(true)
+      expect(modal.props('bancoId')).toBe('b1')
+      expect(modal.props('moneda')).toBe('PEN')
+      expect(modal.props('etiqueta')).toBe('BCP')
+    })
+
+    it('guardar el ajuste (o cancelar) cierra el modal', async () => {
+      prepararCargaInicial([categoriaComida], [])
+
+      const wrapper = mount(DashboardView, { global: { plugins: [crearRouterDePrueba()] } })
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+
+      await wrapper
+        .findComponent({ name: 'TarjetaSaldosPorCuenta' })
+        .vm.$emit('editar-cuenta', { bancoId: 'b1', moneda: 'PEN', etiqueta: 'BCP' })
+      await wrapper.vm.$nextTick()
+      expect(wrapper.findComponent({ name: 'ModalAjusteSaldo' }).exists()).toBe(true)
+
+      await wrapper.findComponent({ name: 'ModalAjusteSaldo' }).vm.$emit('guardado')
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.findComponent({ name: 'ModalAjusteSaldo' }).exists()).toBe(false)
+    })
   })
 })

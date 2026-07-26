@@ -3,6 +3,7 @@ import { useGastosStore } from '@/stores/gastos'
 import { supabase } from '@/lib/supabaseClient'
 import type { Gasto, Moneda } from '@/types/gasto'
 import type { Banco, Ingreso } from '@/types/ingreso'
+import type { AjusteSaldoCuenta } from '@/types/ajusteSaldo'
 
 /** Cantidad de meses (incluido el actual) que cubre la ventana de la tendencia mensual. */
 const MESES_VENTANA_TENDENCIA = 6
@@ -222,14 +223,41 @@ export interface SaldoCuenta {
  * aquí las cuentas vienen de un catálogo conocido (bancos ya creados en
  * `bancos`), no de un descubrimiento dinámico — omitir una dejaría un hueco
  * visual confuso ("¿y mi otra cuenta?"). El USD sí se omite (`null`) si el
- * banco nunca tuvo movimiento en esa moneda, para no mostrar un badge
- * "$ 0.00" vacío de significado.
+ * banco nunca tuvo movimiento en esa moneda NI un ajuste seteado en USD,
+ * para no mostrar un badge "$ 0.00" vacío de significado.
+ *
+ * `ajustes` (migración 011, "setear saldo de cuenta"): si una cuenta+moneda
+ * tiene al menos un ajuste, el saldo mostrado es `ajuste.saldo` MÁS los
+ * ingresos/gastos de esa cuenta con fecha POSTERIOR (estrictamente, `>`) a
+ * `ajuste.fecha` — nunca desde el inicio de los tiempos. Se resuelve "el
+ * último ajuste" internamente vía `resolverUltimosAjustes`, así que esta
+ * función acepta el historial completo tal cual lo carga `useAjustesSaldo`,
+ * sin que el llamador tenga que filtrarlo primero.
  */
+function resolverUltimosAjustes(ajustes: AjusteSaldoCuenta[]): Map<string, AjusteSaldoCuenta> {
+  const porClave = new Map<string, AjusteSaldoCuenta>()
+  for (const ajuste of ajustes) {
+    const clave = `${ajuste.banco_id}|${ajuste.moneda}`
+    const actual = porClave.get(clave)
+    if (
+      !actual ||
+      ajuste.fecha > actual.fecha ||
+      (ajuste.fecha === actual.fecha && ajuste.creado_en > actual.creado_en)
+    ) {
+      porClave.set(clave, ajuste)
+    }
+  }
+  return porClave
+}
+
 export function calcularSaldoNetoPorCuenta(
   bancos: Banco[],
   gastos: Gasto[],
   ingresos: Ingreso[],
+  ajustes: AjusteSaldoCuenta[] = [],
 ): SaldoCuenta[] {
+  const ultimosAjustes = resolverUltimosAjustes(ajustes)
+
   const cuentas = bancos
     .filter((banco) =>
       PREFIJOS_CUENTA_DASHBOARD.some((prefijo) => banco.nombre.toLowerCase().startsWith(prefijo)),
@@ -241,16 +269,18 @@ export function calcularSaldoNetoPorCuenta(
     const ingresosBanco = ingresos.filter((ingreso) => ingreso.banco_id === banco.id)
     const tieneMovimientoUsd =
       gastosBanco.some((gasto) => gasto.moneda === 'USD') ||
-      ingresosBanco.some((ingreso) => ingreso.moneda === 'USD')
+      ingresosBanco.some((ingreso) => ingreso.moneda === 'USD') ||
+      ultimosAjustes.has(`${banco.id}|USD`)
 
     function saldoEnMoneda(moneda: Moneda): number {
+      const ajuste = ultimosAjustes.get(`${banco.id}|${moneda}`)
       const totalIngresos = ingresosBanco
-        .filter((ingreso) => ingreso.moneda === moneda)
+        .filter((ingreso) => ingreso.moneda === moneda && (!ajuste || ingreso.fecha > ajuste.fecha))
         .reduce((total, ingreso) => total + ingreso.importe, 0)
       const totalGastos = gastosBanco
-        .filter((gasto) => gasto.moneda === moneda)
+        .filter((gasto) => gasto.moneda === moneda && (!ajuste || gasto.fecha > ajuste.fecha))
         .reduce((total, gasto) => total + (gasto.monto ?? 0), 0)
-      return totalIngresos - totalGastos
+      return (ajuste?.saldo ?? 0) + totalIngresos - totalGastos
     }
 
     return {

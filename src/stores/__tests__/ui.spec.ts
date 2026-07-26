@@ -34,4 +34,20 @@ describe('store ui', () => {
 
     expect(store.modalAbierto).toBe(false)
   })
+
+  it('estado inicial: contadorRegistro es 0', () => {
+    const store = useUiStore()
+
+    expect(store.contadorRegistro).toBe(0)
+  })
+
+  it('camino feliz: notificarRegistro() incrementa contadorRegistro en 1 cada vez', () => {
+    const store = useUiStore()
+
+    store.notificarRegistro()
+    expect(store.contadorRegistro).toBe(1)
+
+    store.notificarRegistro()
+    expect(store.contadorRegistro).toBe(2)
+  })
 })

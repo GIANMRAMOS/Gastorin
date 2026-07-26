@@ -88,4 +88,45 @@ describe('TarjetaSaldosPorCuenta (reemplaza el placeholder "Próximamente")', ()
     expect(wrapper.text()).toContain('IBK')
     expect(wrapper.findAll('.tile-saldo-cuenta')).toHaveLength(0)
   })
+
+  describe('setear saldo (migración 011): cada tile es clickeable', () => {
+    it('camino feliz: cada tile es un <button>; tocar el de BCP emite "editar-cuenta" con su bancoId/moneda/etiqueta', async () => {
+      const wrapper = montar([{ bancoId: 'b1', nombreBanco: 'BCP', saldoPen: 1000, saldoUsd: null }])
+
+      const tile = wrapper.find('.tile-saldo-cuenta')
+      expect(tile.element.tagName).toBe('BUTTON')
+      await tile.trigger('click')
+
+      expect(wrapper.emitted('editar-cuenta')).toEqual([[{ bancoId: 'b1', moneda: 'PEN', etiqueta: 'BCP' }]])
+    })
+
+    it('tocar el tile "IBK S/." emite editar-cuenta con moneda PEN y la etiqueta ya resuelta', async () => {
+      const wrapper = montar([{ bancoId: 'b2', nombreBanco: 'IBK', saldoPen: 300, saldoUsd: null }])
+
+      await wrapper.find('.tile-saldo-cuenta').trigger('click')
+
+      expect(wrapper.emitted('editar-cuenta')).toEqual([[{ bancoId: 'b2', moneda: 'PEN', etiqueta: 'IBK S/.' }]])
+    })
+
+    it('tocar el tile "IBK $" emite editar-cuenta con moneda USD (el mismo bancoId de "IBK US$", no el de "IBK")', async () => {
+      const wrapper = montar([{ bancoId: 'b3', nombreBanco: 'IBK US$', saldoPen: 0, saldoUsd: 5088 }])
+
+      await wrapper.find('.tile-saldo-cuenta').trigger('click')
+
+      expect(wrapper.emitted('editar-cuenta')).toEqual([[{ bancoId: 'b3', moneda: 'USD', etiqueta: 'IBK $' }]])
+    })
+
+    it('con 3 cuentas, cada tile emite su propio evento independiente al tocarlo', async () => {
+      const wrapper = montar([
+        { bancoId: 'b1', nombreBanco: 'BCP', saldoPen: 1000, saldoUsd: null },
+        { bancoId: 'b2', nombreBanco: 'IBK', saldoPen: 300, saldoUsd: null },
+        { bancoId: 'b3', nombreBanco: 'IBK US$', saldoPen: 0, saldoUsd: 5088 },
+      ])
+
+      const tiles = wrapper.findAll('.tile-saldo-cuenta')
+      await tiles[2].trigger('click')
+
+      expect(wrapper.emitted('editar-cuenta')).toEqual([[{ bancoId: 'b3', moneda: 'USD', etiqueta: 'IBK $' }]])
+    })
+  })
 })

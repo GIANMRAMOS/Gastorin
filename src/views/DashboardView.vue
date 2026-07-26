@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import TarjetaKpi from '@/components/TarjetaKpi.vue'
 import TarjetaPresupuestoResumen from '@/components/TarjetaPresupuestoResumen.vue'
 import TarjetaSaldosPorCuenta from '@/components/TarjetaSaldosPorCuenta.vue'
+import ModalAjusteSaldo from '@/components/ModalAjusteSaldo.vue'
 import TarjetaBandejaResumen from '@/components/TarjetaBandejaResumen.vue'
 import FeedMovimientos, { type MovimientoFeed } from '@/components/FeedMovimientos.vue'
 import ChipsFiltroTipo from '@/components/ChipsFiltroTipo.vue'
@@ -25,6 +26,7 @@ import {
 import { useCategorias } from '@/composables/useCategorias'
 import { usePresupuestos } from '@/composables/usePresupuestos'
 import { useBandeja } from '@/composables/useBandeja'
+import { useAjustesSaldo } from '@/composables/useAjustesSaldo'
 import { NOMBRE_BANCO_NO_ESPECIFICADO } from '@/composables/useMoneda'
 import { useGastosStore } from '@/stores/gastos'
 import { useIngresosStore } from '@/stores/ingresos'
@@ -48,9 +50,28 @@ const { filas, filasIngresos, cargarDatosDashboard } = useDashboard()
 const { cargarCategorias } = useCategorias()
 const { cargarPresupuestos } = usePresupuestos()
 const { cargarBorradores } = useBandeja()
+const { ajustes: ajustesSaldo, cargarAjustesSaldo } = useAjustesSaldo()
 const storeGastos = useGastosStore()
 const storeIngresos = useIngresosStore()
 const storeUi = useUiStore()
+
+/** Cuenta que el usuario tocó en "Saldo por cuenta" para setear su saldo, o `null` si el modal está cerrado. */
+const cuentaEnEdicion = ref<{ bancoId: string; moneda: Moneda; etiqueta: string } | null>(null)
+
+/** Abre `ModalAjusteSaldo` para la cuenta tocada. */
+function abrirAjusteSaldo(cuenta: { bancoId: string; moneda: Moneda; etiqueta: string }) {
+  cuentaEnEdicion.value = cuenta
+}
+
+/** Cierra el modal de ajuste de saldo sin guardar. */
+function cerrarAjusteSaldo() {
+  cuentaEnEdicion.value = null
+}
+
+/** Tras guardar el ajuste, cierra el modal; `ajustesSaldo` ya se actualizó en el propio composable (push local). */
+function manejarGuardadoAjusteSaldo() {
+  cuentaEnEdicion.value = null
+}
 
 /** Moneda que gobierna a la vez los KPIs, el presupuesto, el feed, el gasto por categoría y las tendencias. */
 const monedaSeleccionada = ref<Moneda>('PEN')
@@ -72,7 +93,22 @@ onMounted(() => {
   cargarDatosDashboard()
   cargarPresupuestos()
   cargarBorradores()
+  cargarAjustesSaldo()
 })
+
+/**
+ * `filas`/`filasIngresos` son una copia local de `useDashboard`, no el store
+ * de dominio: registrar un gasto/ingreso desde el FAB (montado en
+ * `AppShellLayout`, fuera de esta vista) no las actualiza por reactividad de
+ * Pinia. Sin este `watch`, los 3 KPIs, "Saldo por cuenta", el feed y las
+ * tendencias quedaban desactualizados hasta navegar fuera y volver.
+ */
+watch(
+  () => storeUi.contadorRegistro,
+  () => {
+    cargarDatosDashboard()
+  },
+)
 
 /** Primer día del mes actual (`YYYY-MM-01`), base de las agregaciones "mes actual". */
 const mesActual = computed(() => {
@@ -120,13 +156,14 @@ const resumenPorMoneda = computed(() => cargarResumenPorMoneda(filas.value, mesA
 /**
  * Saldo neto (ingresos − gastos) de las cuentas BCP e IBK para el strip
  * "Saldo por cuenta": usa `filas`/`filasIngresos` (ventana de 6 meses ya
- * cargada por `cargarDatosDashboard`) y `storeIngresos.bancos` (catálogo ya
- * hidratado por `AppShellLayout`), sin fetch propio. Independiente del
+ * cargada por `cargarDatosDashboard`), `storeIngresos.bancos` (catálogo ya
+ * hidratado por `AppShellLayout`) y `ajustesSaldo` (historial de "setear
+ * saldo", migración 011) — sin fetch propio adicional. Independiente del
  * toggle de moneda del encabezado (siempre PEN + badge USD si aplica, ver
  * `calcularSaldoNetoPorCuenta`).
  */
 const saldosPorCuenta = computed(() =>
-  calcularSaldoNetoPorCuenta(storeIngresos.bancos, filas.value, filasIngresos.value),
+  calcularSaldoNetoPorCuenta(storeIngresos.bancos, filas.value, filasIngresos.value, ajustesSaldo.value),
 )
 
 /** Balance neto (ingresos − gastos) del mes actual por moneda (PEN y USD): fuente directa de los KPIs. */
@@ -243,7 +280,16 @@ const movimientosEnriquecidos = computed<MovimientoFeed[]>(() =>
       />
     </div>
 
-    <TarjetaSaldosPorCuenta :cuentas="saldosPorCuenta" />
+    <TarjetaSaldosPorCuenta :cuentas="saldosPorCuenta" @editar-cuenta="abrirAjusteSaldo" />
+
+    <ModalAjusteSaldo
+      v-if="cuentaEnEdicion"
+      :banco-id="cuentaEnEdicion.bancoId"
+      :moneda="cuentaEnEdicion.moneda"
+      :etiqueta="cuentaEnEdicion.etiqueta"
+      @cerrar="cerrarAjusteSaldo"
+      @guardado="manejarGuardadoAjusteSaldo"
+    />
 
     <div class="grid-inicio">
       <section class="columna-historial">

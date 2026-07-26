@@ -15,6 +15,18 @@ export const useUiStore = defineStore('ui', {
   state: () => ({
     modalAbierto: false,
     hojaAccionesAbierta: false,
+    /**
+     * Contador que sube cada vez que se confirma un gasto o ingreso desde
+     * `ModalGasto`/`ModalIngreso` (montados en `AppShellLayout`, fuera de
+     * cualquier vista). Vistas que mantienen su PROPIA copia local de datos
+     * en vez de leer directo del store de dominio (ej. `DashboardView` vía
+     * `useDashboard().cargarDatosDashboard()`, o el propio `AppShellLayout`
+     * con la card "Proyección") no se enteran de un registro nuevo por
+     * reactividad de Pinia — necesitan un `watch` sobre este contador para
+     * volver a pedir sus datos. Las vistas que sí leen directo del store
+     * (Egresos/Ingresos) no lo necesitan: ya son reactivas.
+     */
+    contadorRegistro: 0,
   }),
   actions: {
     /** Marca que hay un modal abierto. */
@@ -32,6 +44,10 @@ export const useUiStore = defineStore('ui', {
     /** Cierra la hoja de acciones sin haber elegido ninguna acción. */
     cerrarHojaAcciones() {
       this.hojaAccionesAbierta = false
+    },
+    /** Señala que se acaba de confirmar un gasto o ingreso, para que quien mantenga datos locales los vuelva a pedir. */
+    notificarRegistro() {
+      this.contadorRegistro += 1
     },
   },
 })

@@ -460,6 +460,53 @@ describe('AppShellLayout — fix: bancos/categorías se cargan al montar el shel
   })
 })
 
+describe('AppShellLayout — refresco tras registrar (fix: Dashboard/card "Proyección" quedaban desactualizados)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  afterEach(() => {
+    wrapperActivo?.unmount()
+    wrapperActivo = null
+  })
+
+  it('al confirmar un gasto, notifica storeUi.contadorRegistro y vuelve a pedir los gastos del mes (card "Proyección")', async () => {
+    const wrapper = await montarShell()
+    await flushPromises()
+    const storeUi = useUiStore()
+
+    const llamadasGastosAntes = fromMock.mock.calls.filter(([tabla]) => tabla === 'gastos').length
+
+    await wrapper.find('.boton-fab').trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.find('.opcion-hoja').trigger('click')
+    await wrapper.vm.$nextTick()
+    await wrapper.findComponent({ name: 'ModalGasto' }).vm.$emit('guardado')
+    await flushPromises()
+
+    expect(storeUi.contadorRegistro).toBe(1)
+    const llamadasGastosDespues = fromMock.mock.calls.filter(([tabla]) => tabla === 'gastos').length
+    expect(llamadasGastosDespues).toBeGreaterThan(llamadasGastosAntes)
+  })
+
+  it('al confirmar un ingreso, también notifica storeUi.contadorRegistro', async () => {
+    const wrapper = await montarShell()
+    await flushPromises()
+    const storeUi = useUiStore()
+
+    await wrapper.find('.boton-fab').trigger('click')
+    await wrapper.vm.$nextTick()
+    const opciones = wrapper.findAll('.opcion-hoja')
+    await opciones[1].trigger('click')
+    await wrapper.vm.$nextTick()
+
+    await wrapper.findComponent({ name: 'ModalIngreso' }).vm.$emit('guardado')
+    await flushPromises()
+
+    expect(storeUi.contadorRegistro).toBe(1)
+  })
+})
+
 /** Gasto mínimo válido, para no repetir todos los campos en cada test de esta sección. */
 function borradorFalso(datos: Partial<Pick<Gasto, 'id' | 'monto' | 'moneda'>> = {}): Gasto {
   return {
