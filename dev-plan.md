@@ -1,91 +1,85 @@
-# Micro-plan — Orden por timestamp de registro (HU-18.1) + afordancia de acciones en TablaMovimientos
+# Micro-plan — Sacar la columna "Acciones" fuera del scroll horizontal de `TablaMovimientos.vue`
 
-> Sobrescribe el `dev-plan.md` anterior (Fase 4 "Caudal", PresupuestosView, ya construida y en el código actual).
+> Sobrescribe el `dev-plan.md` anterior (HU-18.1 orden por timestamp + afordancia de acciones, ya construido y en el código actual).
 
 ## Patrón arquitectónico detectado
 
-Capas estrictas (confirmadas en CLAUDE.md y en el código):
+- **Capas (CLAUDE.md, estricta):** `TablaMovimientos.vue` es un componente *presentacional puro* de `components/`. No toca Supabase ni el store; recibe `filas: FilaMovimiento[]` + `totalSinFiltrar: number` y emite `editar: [string]` / `eliminar: [string]`. Ambas vistas (`HistorialView.vue`, `IngresosView.vue`) resuelven el id emitido contra el store (`abrirModalEdicionPorId`, `pedirConfirmacionEliminarPorId`). **El contrato externo es el único acoplamiento y no se toca.**
+- **Convenciones del propio componente:** nombres/comentarios en español; comentarios solo para el "por qué" no obvio (el archivo ya está lleno de ellos, es el estilo); `min-width/height: 44px` como zona táctil; menú "⋮" con estado único `filaMenuAbiertoId` + cierre por `mousedown` afuera (no `click`, para no perder la carrera con el `click` del ítem) + `Escape`; breakpoint local de ESTE componente = **640px** (distinto del global de 900px de la app; se respeta el 640px existente porque es donde esta tabla colapsa a tarjetas).
+- **Patrón de tests (dato decisivo, leído del código real):** los unitarios (`TablaMovimientos.spec.ts`) navegan por `thead th`, `tfoot`, `tbody tr`, `td[data-etiqueta]` y clases (`.boton-menu-acciones`, `.boton-editar`, `.boton-eliminar`, `.menu-acciones-fila`). Los de integración (`HistorialView.*`, `IngresosView.*`) cuentan filas con `wrapper.findAll('tbody tr')` (~10 veces por archivo) y disparan acciones con `wrapper.find('.boton-menu-acciones')` **sin scoping** (primer match). Esto gobierna la elección de enfoque.
 
-- `types/*.ts` espejan las tablas. Confirmado: `Gasto.creado_en: string` (tabla `gastos`) y `Ingreso.created_at: string` (tabla `ingresos`) — nombres realmente distintos entre ambas tablas, tal como advertía la tarea. No hay que tocar `types/`.
-- `composables/use*.ts` son la ÚNICA puerta a Supabase. Las tres queries a cambiar viven ahí (`useGastos.cargarGastos`, `useIngresos.cargarIngresos`, `useDashboard.cargarDatosDashboard`). Cada una arma la cadena `supabase.from(...).select()...order(...)`.
-- Las vistas leen del store (Egresos/Ingresos) o de refs locales del composable (Dashboard) y son presentacionales.
-- `TablaMovimientos.vue` es presentacional puro (`filas` ya viene lista y ordenada; emite `editar`/`eliminar` por id). Es compartido por `HistorialView` (Egresos) e `IngresosView`, así que el fix visual aplica a ambas automáticamente.
+## Enfoque técnico elegido (decidido, no abierto)
 
-Flujo de orden, ya trazado (dato clave para el plan):
+**Opción B refinada: "tabla de datos + carril de acciones lateral".** Un envoltorio flex con dos regiones hermanas:
 
-- **Egresos / Ingresos**: `store.gastos`/`store.ingresos` se pintan en el orden que devolvió la query. `HistorialView.gastosFiltrados`/`filasTabla` (y el equivalente en `IngresosView`) usan solo `.filter()`/`.map()`, que PRESERVAN el orden. `TablaMovimientos` NO reordena. ⇒ cambiar el `.order()` de la query basta para estas dos vistas.
-- **Feed del Dashboard**: `FeedMovimientos.vue` NO reordena (agrupa con `agruparPorFecha`, que respeta el orden recibido). PERO el orden lo fija `DashboardView` vía `combinarMovimientosDelMes(...)`, que RE-ORDENA en memoria con `compararMovimientosDesc` (primario `fecha` desc, desempate por `id`). Por eso, cambiar solo el `.order()` de `cargarDatosDashboard` NO cambia el orden visible del feed: para dos movimientos del mismo día el desempate hoy es por `id` (UUID, arbitrario), no por hora de registro.
+1. `.envoltorio-datos` — `overflow-x: auto`, `flex: 1; min-width: 0`. Contiene la `<table class="tabla-movimientos">` **con solo las 5 columnas de datos** (Fecha, Descripción, Categoría, Banco, Monto). Mantiene `<thead>`/`<tbody>`/`<tfoot>` nativos.
+2. `.carril-acciones` — `flex: 0 0 auto`, ancho fijo (~56px), **fuera del `overflow`**, sin scroll. Contiene el control "⋮" por fila (reusando el menú actual) + su cabecera (sr-only "Acciones") + un espaciador al pie que alinea con el `<tfoot>`.
+
+**Por qué B y no A:** la Opción A (grid por fila con `overflow-x` propio en cada fila) tiene un defecto de UX que la descarta: si cada fila scrollea por su cuenta, las columnas dejan de alinearse verticalmente entre filas y aparecen múltiples scrollbars. Una tabla de datos exige **un solo scrollbar y columnas alineadas**, y eso obliga a que TODAS las filas de datos vivan en un único contenedor de scroll — exactamente la región `.envoltorio-datos` de la Opción B. La `<table>` nativa es además la forma más barata de mantener anchos de columna consistentes entre filas.
+
+**Por qué B y no abandonar `<table>`:** los tests de integración cuentan `findAll('tbody tr')`. Conservando `<table>`/`<tbody>`/`<tr>` para los datos, **ambos specs de integración pasan sin cambios** y no hace falta reconstruir semántica de tabla con ARIA. Abandonar la tabla (Opción A) obligaría a reescribir ~20 asserts de integración y a replicar la semántica con roles ARIA — mucho más blast radius por cero beneficio de layout.
+
+**Por qué esto SÍ resuelve el overlap de raíz (y el sticky no):** el carril tiene su ancho reservado por el `flex` del envoltorio; nunca comparte caja con las columnas de datos y `table-layout: auto` ya no puede reasignar su ancho al Monto, porque el carril **no es una columna de la tabla**. El botón vive fuera del contenedor con `overflow`, así que es imposible que quede tapado o que tape nada, en cualquier `scrollLeft`.
+
+**Riesgo de desincronización de altura (el punto débil declarado de B) — neutralizado por el diseño existente:** en escritorio la descripción usa `white-space: nowrap; text-overflow: ellipsis` (`.celda-descripcion`) → **toda fila de datos es de una sola línea**, altura constante e independiente del contenido. Con el mismo box-model en el carril (igual `padding: var(--espacio-3)`, igual `border-bottom: 1px`, igual `line-height`) las alturas coinciden por construcción, no por suerte. El escenario que rompería B (una descripción que wrappea y agranda la fila) **no puede ocurrir en escritorio** por el `nowrap`. Blindaje extra: definir una variable `--altura-fila` aplicada a `.fila-movimiento td` y a la celda del carril. En mobile no aplica (ver responsive).
+
+## Responsive (breakpoint 640px) — confirmación y decisión
+
+Confirmado: **en mobile NO hay problema de overlap** (no hay scroll horizontal; la tabla colapsa a tarjetas apiladas con `data-etiqueta`), así que el split lateral no hace falta y de hecho estorba (un carril lateral no puede alinearse con tarjetas de altura variable que wrappean).
+
+Decisión para no duplicar el control ni introducir fragilidad de doble render: **render condicional por `matchMedia('(max-width: 640px)')`** (reactivo, con listener añadido/quitado en `onMounted`/`onUnmounted`, igual que los listeners actuales de `mousedown`/`keydown`). Solo se monta UNA de las dos ubicaciones a la vez:
+- **Escritorio** (`esMovil = false`, y también el default cuando `window.matchMedia` no existe → **jsdom cae acá**): acciones en `.carril-acciones`.
+- **Mobile** (`esMovil = true`): acciones como una celda dentro de cada `<tr>` (vuelve a stackear dentro de la tarjeta, con `data-etiqueta="Acciones"` y `justify-content: flex-end`, como hoy).
+
+Para no duplicar el markup del botón + menú (SVGs, roles), **extraer un subcomponente interno `AccionesFila.vue`** usado en ambas ubicaciones. El estado `filaMenuAbiertoId` y los handlers `editar/eliminar` quedan en el padre y se pasan por props/emit — una sola fuente de verdad del menú abierto. `matchMedia` como pieza JS es una desviación menor del "responsive puro por CSS", justificada porque CSS no puede reubicar un nodo del DOM de un contenedor a otro.
 
 ## Desviación de arquitectura
 
-- ¿Se necesita desviarse? **NO.** Son cambios de query (columna de orden) y de presentación (íconos). No tocan modelo de datos, migraciones, ni la capa de stores. Encaja en el patrón existente. No dispara GATE 1.
-- **Aclaración de alcance importante (no es desviación, pero corrige la tarea):** para que el **feed del Dashboard** cumpla el criterio Gherkin "mismo día ordenados por hora real", NO basta con cambiar las dos queries de `useDashboard` como decía la tarea. El feed se re-ordena en memoria en `combinarMovimientosDelMes`/`compararMovimientosDesc`, cuyo desempate es por `id`. Hay que llevar el timestamp de creación dentro de `MovimientoUnificado` y usarlo como desempate. Es un cambio acotado dentro del mismo composable (`useDashboard.ts`), sin tocar otra capa. Cambiar además el `.order()` de las queries de `cargarDatosDashboard` es de bajo valor por sí solo (el feed re-ordena y las agregaciones son independientes del orden), pero se hace igual por consistencia y porque la tarea lo pide.
+- **¿Se necesita desviarse? NO.** Refactor interno de la vista de UN componente presentacional. No cambia el modelo de datos, no toca Supabase/store/composables, no cambia el contrato (props/emits idénticos) → `HistorialView.vue` e `IngresosView.vue` no requieren ningún cambio. **No dispara GATE 1.**
+- Coincido con el criterio inicial de Gianmarco tras ver el código real. Dos matices menores, contenidos dentro del componente y sin impacto en otros módulos (los declaro por transparencia, no ameritan consultar a Architect):
+  1. Se introduce un subcomponente hijo `AccionesFila.vue` (archivo nuevo, pero interno a esta feature).
+  2. Se introduce un uso de `matchMedia` (patrón nuevo en este componente) para el render responsive del control.
 
 ## Archivos a crear/modificar
 
-### Chunk A — Orden Egresos/Ingresos (independiente, paralelizable)
-- `src/composables/useGastos.ts` — modificar — en `cargarGastos()`: cambiar `.order('fecha', { ascending: false })` por `.order('creado_en', { ascending: false })`.
-- `src/composables/useIngresos.ts` — modificar — en `cargarIngresos()`: cambiar `.order('fecha', { ascending: false })` por `.order('created_at', { ascending: false })`.
+- `src/components/TablaMovimientos.vue` — **modificar** — nuevo layout flex (`.tabla-con-acciones` = `.envoltorio-datos` + `.carril-acciones`); `<table>` reducida a 5 columnas; `<tfoot>` ajustado; `matchMedia` reactivo (`esMovil`) con listener en mount/unmount; render del control en carril (desktop) o como `<td>` dentro del `<tr>` (mobile); mover estado del menú/handlers como props/emit hacia el hijo. CSS: quitar `position: sticky/right/box-shadow` de `.columna-acciones`; añadir estilos del envoltorio flex, carril y alineación de alturas; ajustar el bloque `@media (max-width: 640px)`.
+- `src/components/AccionesFila.vue` — **crear** — control "⋮" por fila. Props `{ filaId: string; abierto: boolean; etiquetaFila?: string }`; emits `{ alternar: [string]; editar: [string]; eliminar: [string] }`. Contiene el botón `.boton-menu-acciones` (con `aria-haspopup`/`aria-expanded`/`aria-label`) y el `.menu-acciones-fila` (`role="menu"` con `.boton-editar`/`.boton-eliminar`, `role="menuitem"`). **Reutilizar el markup y la lógica actuales tal cual** (SVGs, clases, roles); solo se extraen, no se reescriben. El contenedor raíz lleva `.celda-acciones` + `data-fila-id` para que el `manejarClicFuera` del padre (que busca `.celda-acciones[data-fila-id="..."]`) siga funcionando sin cambios.
 
-### Chunk B — Orden del feed del Dashboard (independiente de A)
-- `src/composables/useDashboard.ts` — modificar:
-  1. `cargarDatosDashboard()`: query de gastos `.order('fecha'...)` → `.order('creado_en', { ascending: false })`; query de ingresos `.order('fecha'...)` → `.order('created_at', { ascending: false })`. (El filtro `.gte('fecha', ...)` de la ventana de 6 meses se mantiene tal cual: la ventana sigue siendo por fecha del movimiento.)
-  2. Interface `MovimientoUnificado`: agregar campo `creadoEn: string`.
-  3. `movimientoDesdeGasto`: `creadoEn: gasto.creado_en`. `movimientoDesdeIngreso`: `creadoEn: ingreso.created_at`.
-  4. `compararMovimientosDesc`: mantener `fecha` desc como primario (para que el agrupado por día de `agruparPorFecha` siga siendo válido); cambiar el desempate: primero `creadoEn` desc, y como último desempate determinista dejar `id` desc (para casos con `creadoEn` igual/ausente). Es decir: `fecha` → `creadoEn` → `id`.
-- `src/views/DashboardView.vue` — NO tocar. `movimientosEnriquecidos` hace `...movimiento`, así que `creadoEn` fluye solo hacia `MovimientoFeed` (que extiende `MovimientoUnificado`). Solo confirmar, no requiere edición.
-- `src/components/FeedMovimientos.vue` — NO tocar. Confirmado: no reordena, solo agrupa en el orden recibido.
+> Chunk único, NO paralelizable: los dos archivos están fuertemente acoplados (el padre extrae al hijo). Un solo builder.
 
-### Chunk C — Afordancia visual de acciones (independiente de A y B)
-- `src/components/TablaMovimientos.vue` — modificar:
-  - Reemplazar el texto "Editar" por un `<svg>` de lápiz (reusar el `path` de lápiz de `TarjetaSaldosPorCuenta.vue`: `M12 20h9` + `M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z`, con `viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"`).
-  - Reemplazar el "×" desnudo del botón eliminar por un `<svg>` de tacho/basura, mismo estilo de trazo.
-  - Agregar `aria-label="Editar movimiento"` al botón de editar (el de eliminar ya tiene `aria-label="Eliminar movimiento"`).
-  - **Mantener las clases `.boton-editar` y `.boton-eliminar`** (los tests las usan como selector; ver Plan de pruebas) y ambos siguen siendo `<button type="button">` reales que emiten `editar`/`eliminar`.
-  - Contraste: hoy `.boton-fila` usa `color-texto-secundario` (apagado). Subir a `--color-texto` para editar y mantener/reforzar `--color-error` para eliminar; dar tamaño de ícono explícito (ej. 16-18px) para que se noten.
-  - **Responsive**: revisar el bloque `@media (max-width: 640px)` (la tabla colapsa a tarjetas apiladas). La celda de acciones ahí tiene `.celda-acciones::before { content: none; }` y `justify-content: flex-end`. Confirmar que los dos íconos quedan alineados y con área de toque suficiente en ese layout, no solo en escritorio.
+## Detalle por zona (para no adivinar)
 
-### Tests a actualizar (obligatorio: la suite completa debe quedar verde — GATE 2 + CLAUDE.md)
-- `src/composables/__tests__/useGastos.spec.ts` (~línea 57): la aserción `expect(builder.order).toHaveBeenCalledWith('fecha', { ascending: false })` pasa a `'creado_en'`. Ajustar también el título del `it` ("ordenados por fecha descendente").
-- `src/composables/__tests__/useIngresos.spec.ts` (~línea 51): idem a `'created_at'`.
-- `src/composables/__tests__/useDashboard.spec.ts`: el test de empate (~líneas 542-553) asume desempate por `id`; los helpers `gastoDe`/`ingresoDe` hoy ponen `creado_en`/`created_at = ''`. Con el nuevo desempate `creadoEn`→`id`, ese test sigue pasando (ambos con `creadoEn=''` caen al desempate por `id`), pero conviene: (a) dar `creado_en`/`created_at` reales en los helpers, (b) actualizar el comentario "Desempate determinista por id". Verificar que ninguna otra aserción de `combinarMovimientosDelMes`/`combinarUltimosMovimientos` se rompa (las que ordenan por fechas distintas no se afectan). No hay aserción sobre el arg de `.order()` en este spec (solo sobre `.gte('fecha', ...)`, que no cambia).
-- `src/components/__tests__/TablaMovimientos.spec.ts`: usa selectores `.boton-editar`/`.boton-eliminar` (NO texto), así que sigue verde si se conservan las clases. Agregar aserción de `aria-label="Editar movimiento"` como parte del fix de accesibilidad.
+- **`<thead>`:** la tabla de datos queda con 5 `<th>` (Fecha, Descripción, Categoría, Banco, Monto). El header "Acciones" (hoy `<th>` con `<span class="sr-only">`) se muda a la cabecera del `.carril-acciones` como `<span class="sr-only">Acciones</span>`, con la misma altura que la fila del `thead` para alinear.
+- **`<tfoot>`:** hoy es `colspan=4` ("N de N") + celda Monto + celda Acciones vacía (`.celda-acciones-total`). Nuevo: `colspan=4` + celda Monto (total 5 columnas). **Se elimina la `<td class="celda-acciones-total">`** y su CSS (ya no hay columna sticky que alinear — ése era su único motivo, según el comentario del propio archivo, líneas 190-196). El carril lleva un espaciador al pie que iguala la altura del `<tfoot>` (recordar: `.fila-totales td` usa `border-top: 2px`, sin `border-bottom`) para que el borde derecho cierre parejo.
+- **Menú "⋮":** reusar la lógica existente sin reconstruirla. El menú (`position: absolute; top:100%; right:0`) ahora vive dentro de la celda del carril, que debe ser `position: relative` y **sin `overflow: hidden`** — al estar fuera del `.envoltorio-datos` (que sí tiene `overflow-x`), el desplegable ya no corre riesgo de recorte (mejora respecto a hoy). Ancho del carril ~56px < 150px del menú → el menú se despliega hacia la izquierda desde el botón (correcto).
+- **Accesibilidad:** los datos conservan `<table>` nativa (lectores la anuncian como tabla, sin ARIA manual). Como en escritorio el control sale de la tabla, se pierde su asociación con la fila en el árbol de accesibilidad → **enriquecer el `aria-label` del botón para incluir contexto de fila**, p. ej. `Más acciones para {descripcion}` (el padre pasa `etiquetaFila` al hijo). Mantener `aria-haspopup`, `aria-expanded`, `role="menu"`/`menuitem` y los `aria-label` de Editar/Eliminar. En mobile el control va dentro del `<tr>` → asociación nativa intacta.
 
 ## Plan de pruebas
 
-### Camino feliz
-- Egresos: `cargarGastos` consulta con `.order('creado_en', { ascending: false })` y el store queda con los gastos más recientemente registrados primero.
-- Ingresos: `cargarIngresos` consulta con `.order('created_at', { ascending: false })`.
-- Dashboard: `cargarDatosDashboard` usa `creado_en` (gastos) y `created_at` (ingresos); `combinarMovimientosDelMes` devuelve, dentro de cada día, los movimientos por `creadoEn` desc.
-- TablaMovimientos: se renderizan íconos de lápiz y tacho visibles; clic en lápiz emite `editar` con el id; clic en tacho emite `eliminar` con el id.
+### Tests existentes que ROMPEN y hay que actualizar (`TablaMovimientos.spec.ts`)
+- `columnas de encabezado ... toEqual([...,'Monto','Acciones'])`: ahora `thead th` = 5. Cambiar a los 5 de datos + assert aparte de que la cabecera sr-only "Acciones" existe en el carril.
+- `responsive: cada celda lleva data-etiqueta ... toEqual([...,'Monto','Acciones'])`: en escritorio (default jsdom) el `tbody td[data-etiqueta]` = 5 (Acciones ya no es `td`). Ajustar a 5.
+- `acción editar` / `acción eliminar` / `abrir el menú de una fila cierra el de otra`: usan `filaTaxi.find('.boton-menu-acciones')` **scopeado a `tbody tr`**. El botón se mudó al carril (fuera del `tr`) → localizarlo por `.celda-acciones[data-fila-id="m2"]` a nivel `wrapper`. Igual para verificar `.menu-acciones-fila` abierto/cerrado (buscar por `data-fila-id`, no dentro del `tr`).
+- `accesibilidad: aria-label ... toBe('Más acciones')`: al enriquecer el label, cambiar a `toContain('Más acciones')` o al texto nuevo con contexto.
 
-### Borde / error
-- **Empate de `creadoEn`** (mismo timestamp exacto, ej. seed/backfill): el desempate cae a `id` desc — orden determinista y reproducible (mismo input, mismo output).
-- Query devuelve `error` → se mantiene el manejo actual (`establecerError`, return false). Sin cambios, cubierto por los tests existentes.
-- Array vacío en el feed / sin movimientos → `[]`, mensaje "Ningún movimiento con estos filtros" (sin regresión).
-- **Consecuencia intencional a validar**: en las tablas planas (Egresos/Ingresos) el orden pasa a ser por registro, no por fecha; un movimiento con `fecha` antigua pero registrado hoy sube al tope. Es el comportamiento pedido por PO. En el feed del Dashboard, en cambio, ese mismo movimiento aparece en el grupo de su `fecha` (día), ordenado dentro del día por `creadoEn` — coherente con que el feed agrupa por día.
-- TablaMovimientos en mobile (`@media max-width: 640px`): los dos íconos se ven y son tocables en el layout de tarjetas apiladas, no solo en escritorio.
+### Tests existentes que NO deberían romper (verificar, no tocar)
+- `TablaMovimientos.spec.ts`: camino feliz, `tfoot` "N de N" + totales por moneda, "N de N sin filtrar", sin filas (no `tfoot`, 0 `tbody tr`), toggle del menú, "no está en el DOM hasta clic", cierre tras seleccionar. Siguen válidos (la `<table>` de datos y el `tfoot` persisten).
+- **Integración** (`HistorialView.integracion`, `IngresosView.integracion`, `HistorialView.spec`, `IngresosView.spec`): cuentan `findAll('tbody tr')` (sobrevive: solo cuenta filas de datos, el carril NO usa `tr`) y disparan `wrapper.find('.boton-menu-acciones')` / `.boton-editar` / `.boton-eliminar` **sin scoping** (primer match, sigue existiendo). **Expectativa: pasan sin cambios.** Verificarlo explícitamente es parte del gate.
 
-### Criterios de aceptación — HU-18.1 (Gherkin de ProductOwner)
-1. **Dos movimientos del mismo día ordenados por hora real de registro**
-   - Dado dos gastos con la misma `fecha` (mismo día) pero distinto `creado_en`,
-   - Cuando se carga la lista de Egresos,
-   - Entonces el de `creado_en` más reciente aparece primero.
-   - (Test unitario en `useGastos.spec.ts` verificando el arg `.order('creado_en', {ascending:false})`; test de `combinarMovimientosDelMes` en `useDashboard.spec.ts` con dos ítems misma `fecha`, distinto `creadoEn` → orden por `creadoEn` desc.)
-2. **Orden estable tras editar (regresión)**
-   - Dado un movimiento en una posición del listado,
-   - Cuando se edita su categoría/descripción/monto (que NO tocan `creado_en`/`created_at`; solo `actualizado_en` en gastos),
-   - Entonces conserva su posición (no salta al tope).
-   - Confirmado en el código: `editarGasto`/`editarIngreso` mandan `update(input)` con `Partial<GastoInput>`/`Partial<IngresoInput>`, y esos tipos NO contienen las columnas de timestamp. Test de regresión: tras `actualizarGasto` en el store, el orden relativo no cambia porque el criterio de orden (`creado_en`) es inmutable en la edición.
-3. **Mismo comportamiento en Egresos / Ingresos / Feed del Dashboard**
-   - Egresos vía `useGastos.cargarGastos` (`creado_en`).
-   - Ingresos vía `useIngresos.cargarIngresos` (`created_at`).
-   - Feed del Dashboard vía `combinarMovimientosDelMes` (desempate `creadoEn`) — cubierto por su propio test unitario, ya que cambiar solo la query NO era suficiente.
+### Verificación NUEVA del problema resuelto (cierra el "compila y pasa no bastó")
+- **Invariante estructural (vitest, sí verificable):** afirmar que el control de acciones **NO es descendiente del contenedor con scroll**: `wrapper.find('.envoltorio-datos').find('.boton-menu-acciones').exists()` debe ser `false`, y `wrapper.find('.carril-acciones .boton-menu-acciones').exists()` debe ser `true`. Garantiza por construcción que ningún `scrollLeft` puede tapar ni desplazar el botón — es el proxy honesto de "fuera del área de scroll" que jsdom sí puede comprobar.
+- **Honestidad sobre `getBoundingClientRect`:** jsdom **no calcula layout** (rects en 0), así que la comprobación geométrica real (rect del botón no intersecta el rect de "Monto" en `scrollLeft=0`) **no es fiable en vitest**. Se deja como verificación de QA/manual en navegador real (o Playwright si se automatiza): con datos que fuercen scroll horizontal, confirmar en escritorio que "⋮" está siempre visible y que "Monto" nunca queda cubierto, en `scrollLeft=0` y con scroll al máximo. Anotar para Demoleitor/QA; no darlo por cerrado solo con vitest.
+
+### Casos de prueba (mantener/añadir)
+- Camino feliz: 1 fila por movimiento con fecha/descr/categoría/banco/monto formateado (existente).
+- Borde: sin filas → sin `tfoot`, 0 `tbody tr` (existente); "N de N" con filtrado (existente).
+- Acciones: abrir "⋮" → Editar emite `editar` con id; → Eliminar emite `eliminar` con id; toggle; abrir una fila cierra otra (existentes, re-localizados al carril).
+- Nuevo: invariante estructural "acciones fuera de `.envoltorio-datos`".
 
 ## Sugerencias fuera de alcance (no implementar en este build)
-- El `id` como último desempate en `compararMovimientosDesc` es UUID (arbitrario); si en el futuro se quisiera un empate 100% intuitivo cuando `creadoEn` coincide, haría falta un tercer criterio semántico. Innecesario hoy.
-- `UltimosMovimientos.vue` (widget legado, fuera del Dashboard actual) también consume `combinarUltimosMovimientos`; hereda el nuevo desempate por `creadoEn` sin cambios extra. No requiere acción, solo se nota que el cambio lo alcanza.
+- Unificar el breakpoint de este componente (640px) con el global de la app (900px) es una decisión de UX aparte; hoy se respeta el 640px existente para no cambiar comportamiento.
+- Automatizar la verificación geométrica del overlap con Playwright sería un buen refuerzo permanente, pero excede este refactor y la infra de tests actual (vitest/jsdom).
 
 ## Lo que no pude verificar / supuestos
-- No inspeccioné `IngresosView.vue` línea por línea, pero por el patrón compartido (usa `TablaMovimientos` y filtra `store.ingresos` con `.filter/.map`) se asume que NO reordena, igual que `HistorialView`. El builder debe confirmarlo de un vistazo antes de cerrar.
-- No corrí `npm run test:run`; las líneas de tests citadas son de lectura estática y deben reconfirmarse al editar.
+- No corrí `npm run build` ni `npm run test:run`; las referencias a líneas de tests son de lectura estática y deben reconfirmarse al editar.
+- El comportamiento de `matchMedia` en el entorno de test (jsdom) se asume ausente o `false` por defecto → render de escritorio (carril). Si el setup de vitest lo stubbea distinto, el builder/tester debe ajustar (guardar con `typeof window.matchMedia === 'function'`).

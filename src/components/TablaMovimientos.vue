@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useMoneda } from '@/composables/useMoneda'
 import type { Moneda } from '@/types/gasto'
+import AccionesFila from '@/components/AccionesFila.vue'
 
 /** Fila ya enriquecida (nombres resueltos, no ids crudos) de un movimiento. */
 export interface FilaMovimiento {
@@ -22,6 +23,13 @@ export interface FilaMovimiento {
  * movimientos" + total por moneda de las filas mostradas). No calcula el
  * filtrado ni el orden: `filas` ya viene lista para pintar, en el orden en
  * que debe mostrarse.
+ *
+ * El control de acciones ("⋮" Editar/Eliminar) vive FUERA del área con
+ * scroll horizontal (`.envoltorio-datos`), en un carril lateral fijo
+ * (`.carril-acciones`), para que nunca quede tapado por ni tape a la columna
+ * Monto sin importar el `scrollLeft`. En mobile (donde no hay scroll
+ * horizontal, la tabla colapsa a tarjetas) el control vuelve a vivir dentro
+ * de cada `<tr>` como una celda más.
  */
 const props = defineProps<{
   filas: FilaMovimiento[]
@@ -35,6 +43,79 @@ const emit = defineEmits<{
 }>()
 
 const { formatearMonto } = useMoneda()
+
+/** Id de la fila cuyo menú "⋮" (Editar/Eliminar) está abierto; solo una fila a la vez. */
+const filaMenuAbiertoId = ref<string | null>(null)
+
+/** Abre el menú de la fila indicada, o lo cierra si ya estaba abierto (toggle). */
+function alternarMenu(id: string) {
+  filaMenuAbiertoId.value = filaMenuAbiertoId.value === id ? null : id
+}
+
+function cerrarMenu() {
+  filaMenuAbiertoId.value = null
+}
+
+function seleccionarEditar(id: string) {
+  emit('editar', id)
+  cerrarMenu()
+}
+
+function seleccionarEliminar(id: string) {
+  emit('eliminar', id)
+  cerrarMenu()
+}
+
+/**
+ * Cierra el menú si el clic ocurrió fuera de la celda de Acciones que lo tiene
+ * abierto. Se escucha en `mousedown` (no `click`) para que dispare ANTES del
+ * `click` del ítem del menú y no le gane la carrera cerrando el menú justo
+ * antes de procesar la selección.
+ */
+function manejarClicFuera(evento: MouseEvent) {
+  if (filaMenuAbiertoId.value === null) return
+  const objetivo = evento.target as HTMLElement
+  const celdaDelMenuAbierto = objetivo.closest(
+    `.celda-acciones[data-fila-id="${filaMenuAbiertoId.value}"]`,
+  )
+  if (!celdaDelMenuAbierto) cerrarMenu()
+}
+
+function manejarTeclaEscape(evento: KeyboardEvent) {
+  if (evento.key === 'Escape') cerrarMenu()
+}
+
+/**
+ * `true` por debajo de 640px, donde la tabla colapsa a tarjetas apiladas y el
+ * carril lateral de acciones no tiene sentido (no hay scroll horizontal que
+ * separar, y un carril no puede alinearse con tarjetas de altura variable).
+ * Reactivo vía `matchMedia`, con el mismo patrón de listener en mount/unmount
+ * que `manejarClicFuera`/`manejarTeclaEscape`. Si el entorno no soporta
+ * `matchMedia` (p. ej. jsdom en los tests), se asume escritorio (carril).
+ */
+const esMovil = ref(false)
+let listaMediaMovil: MediaQueryList | null = null
+
+function actualizarEsMovil(evento: MediaQueryList | MediaQueryListEvent) {
+  esMovil.value = evento.matches
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', manejarClicFuera)
+  document.addEventListener('keydown', manejarTeclaEscape)
+
+  if (typeof window.matchMedia === 'function') {
+    listaMediaMovil = window.matchMedia('(max-width: 640px)')
+    actualizarEsMovil(listaMediaMovil)
+    listaMediaMovil.addEventListener('change', actualizarEsMovil)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('mousedown', manejarClicFuera)
+  document.removeEventListener('keydown', manejarTeclaEscape)
+  listaMediaMovil?.removeEventListener('change', actualizarEsMovil)
+})
 
 /** Total por moneda de las filas MOSTRADAS (ya filtradas), en el orden PEN → USD. */
 const totalesPorMoneda = computed(() => {
@@ -50,77 +131,91 @@ const totalesPorMoneda = computed(() => {
 </script>
 
 <template>
-  <div class="tabla-movimientos-envoltorio">
-    <table class="tabla-movimientos">
-      <thead>
-        <tr>
-          <th scope="col">Fecha</th>
-          <th scope="col">Descripción</th>
-          <th scope="col">Categoría</th>
-          <th scope="col">Banco</th>
-          <th scope="col" class="columna-monto">Monto</th>
-          <th scope="col" class="columna-acciones">
-            <span class="sr-only">Acciones</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="fila in filas" :key="fila.id" class="fila-movimiento">
-          <td data-etiqueta="Fecha">{{ fila.fecha }}</td>
-          <td data-etiqueta="Descripción" class="celda-descripcion">{{ fila.descripcion }}</td>
-          <td data-etiqueta="Categoría">{{ fila.nombreCategoria }}</td>
-          <td data-etiqueta="Banco">{{ fila.nombreBanco }}</td>
-          <td data-etiqueta="Monto" class="columna-monto celda-monto">
-            {{ formatearMonto(fila.monto, fila.moneda) }}
-          </td>
-          <td data-etiqueta="Acciones" class="columna-acciones celda-acciones">
-            <button
-              type="button"
-              class="boton-fila boton-editar"
-              aria-label="Editar movimiento"
-              @click="emit('editar', fila.id)"
-            >
-              <svg class="icono-accion-fila" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M12 20h9" />
-                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              class="boton-fila boton-eliminar"
-              aria-label="Eliminar movimiento"
-              @click="emit('eliminar', fila.id)"
-            >
-              <svg class="icono-accion-fila" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M3 6h18" />
-                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                <path d="M10 11v6" />
-                <path d="M14 11v6" />
-              </svg>
-            </button>
-          </td>
-        </tr>
-      </tbody>
-      <tfoot v-if="filas.length > 0">
-        <tr class="fila-totales">
-          <td :colspan="4" data-etiqueta="Total">
-            {{ filas.length }} de {{ totalSinFiltrar }} movimientos
-          </td>
-          <td colspan="2" class="columna-monto celda-monto-total">
-            <span v-for="(item, indice) in totalesPorMoneda" :key="item.moneda">
-              <template v-if="indice > 0"> + </template>{{ formatearMonto(item.total, item.moneda) }}
-            </span>
-          </td>
-        </tr>
-      </tfoot>
-    </table>
+  <div class="tabla-con-acciones">
+    <div class="envoltorio-datos">
+      <table class="tabla-movimientos">
+        <thead>
+          <tr>
+            <th scope="col">Fecha</th>
+            <th scope="col">Descripción</th>
+            <th scope="col">Categoría</th>
+            <th scope="col">Banco</th>
+            <th scope="col" class="columna-monto">Monto</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="fila in filas" :key="fila.id" class="fila-movimiento">
+            <td data-etiqueta="Fecha">{{ fila.fecha }}</td>
+            <td data-etiqueta="Descripción" class="celda-descripcion">{{ fila.descripcion }}</td>
+            <td data-etiqueta="Categoría">{{ fila.nombreCategoria }}</td>
+            <td data-etiqueta="Banco">{{ fila.nombreBanco }}</td>
+            <td data-etiqueta="Monto" class="columna-monto celda-monto">
+              {{ formatearMonto(fila.monto, fila.moneda) }}
+            </td>
+            <td v-if="esMovil" data-etiqueta="Acciones" class="celda-acciones-envoltorio-movil">
+              <AccionesFila
+                :fila-id="fila.id"
+                :abierto="filaMenuAbiertoId === fila.id"
+                @alternar="alternarMenu"
+                @editar="seleccionarEditar"
+                @eliminar="seleccionarEliminar"
+              />
+            </td>
+          </tr>
+        </tbody>
+        <tfoot v-if="filas.length > 0">
+          <tr class="fila-totales">
+            <td :colspan="4" data-etiqueta="Total">
+              {{ filas.length }} de {{ totalSinFiltrar }} movimientos
+            </td>
+            <td class="columna-monto celda-monto-total">
+              <span v-for="(item, indice) in totalesPorMoneda" :key="item.moneda">
+                <template v-if="indice > 0"> + </template>{{ formatearMonto(item.total, item.moneda) }}
+              </span>
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <!-- Carril lateral de acciones (escritorio): vive fuera de `.envoltorio-datos`
+         (que es el único que tiene `overflow-x`), así que el control "⋮" nunca
+         puede quedar tapado ni tapar contenido al hacer scroll horizontal. -->
+    <div v-if="!esMovil" class="carril-acciones">
+      <div class="carril-acciones-cabecera">
+        <span class="sr-only">Acciones</span>
+      </div>
+      <div v-for="fila in filas" :key="fila.id" class="carril-acciones-fila">
+        <AccionesFila
+          :fila-id="fila.id"
+          :abierto="filaMenuAbiertoId === fila.id"
+          :etiqueta-fila="fila.descripcion"
+          @alternar="alternarMenu"
+          @editar="seleccionarEditar"
+          @eliminar="seleccionarEliminar"
+        />
+      </div>
+      <!-- Espaciador sin contenido: solo iguala la altura del `<tfoot>` para
+           que el borde derecho del carril cierre parejo con la tabla. -->
+      <div v-if="filas.length > 0" class="carril-acciones-pie"></div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.tabla-movimientos-envoltorio {
+/* Altura de línea de texto compartida entre la tabla de datos y el carril de
+   acciones: se usa para dar altura a las celdas del carril que no tienen
+   contenido visible propio (cabecera sr-only, espaciador del pie), donde no
+   hay una caja de línea real que dicte su altura por sí sola. */
+.tabla-con-acciones {
+  --altura-linea-texto: calc(var(--tamano-pequeno) * var(--interlineado));
+  display: flex;
   width: 100%;
+}
+
+.envoltorio-datos {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-x: auto;
 }
 
@@ -140,10 +235,6 @@ const totalesPorMoneda = computed(() => {
 }
 
 .tabla-movimientos .columna-monto {
-  text-align: right;
-}
-
-.tabla-movimientos .columna-acciones {
   text-align: right;
 }
 
@@ -167,42 +258,6 @@ const totalesPorMoneda = computed(() => {
   white-space: nowrap;
 }
 
-.celda-acciones {
-  white-space: nowrap;
-}
-
-.boton-fila {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-family: var(--fuente-base);
-  /* Zona clickeable de ~44px de lado (mínimo táctil recomendado) aunque el
-     ícono visual sea más chico, tanto en escritorio como en el layout
-     apilado de mobile. */
-  min-width: 44px;
-  min-height: 44px;
-  padding: var(--espacio-1) var(--espacio-2);
-}
-.icono-accion-fila {
-  width: 18px;
-  height: 18px;
-}
-.boton-editar {
-  color: var(--color-texto);
-}
-.boton-editar:hover {
-  opacity: 0.75;
-}
-.boton-eliminar {
-  color: var(--color-error, #c0392b);
-}
-.boton-eliminar:hover {
-  opacity: 0.75;
-}
-
 .fila-totales td {
   padding: var(--espacio-3);
   font-weight: 700;
@@ -215,10 +270,58 @@ const totalesPorMoneda = computed(() => {
   white-space: nowrap;
 }
 
+/* Carril lateral de acciones: ancho fijo, fuera del `overflow-x` del
+   envoltorio de datos, sin scroll propio. */
+.carril-acciones {
+  flex: 0 0 56px;
+  width: 56px;
+  display: flex;
+  flex-direction: column;
+}
+
+.carril-acciones-cabecera {
+  /* Mismo box-model que `thead th` (padding + border-bottom) más una altura
+     de línea explícita, ya que su único contenido es un `<span class="sr-only">`
+     fuera del flujo (`position: absolute`) y por sí solo no generaría caja de línea. */
+  padding: var(--espacio-2) var(--espacio-3);
+  min-height: var(--altura-linea-texto);
+  border-bottom: 1px solid var(--color-borde-tarjeta);
+  box-sizing: content-box;
+}
+
+.carril-acciones-fila {
+  /* Mismo padding y border-bottom que `.fila-movimiento td`, para que cada
+     fila del carril alinee verticalmente con su fila de datos correspondiente. */
+  padding: var(--espacio-3);
+  border-bottom: 1px solid var(--color-borde-tarjeta);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.carril-acciones-pie {
+  /* Espaciador vacío que iguala la altura del `<tfoot>` (`.fila-totales td`:
+     mismo padding, mismo grosor de borde superior, sin borde inferior). */
+  padding: var(--espacio-3);
+  min-height: var(--altura-linea-texto);
+  border-top: 2px solid var(--color-borde-tarjeta);
+  box-sizing: content-box;
+}
+
 /* Responsive (~375px): la tabla colapsa a tarjetas apiladas "etiqueta: valor",
    sin scroll horizontal del body (el `overflow-x: auto` del envoltorio deja
-   de ser necesario porque ya no hay una fila ancha que desbordar). */
+   de ser necesario porque ya no hay una fila ancha que desbordar). En este
+   punto de quiebre `esMovil` es `true`: el carril lateral no se renderiza y
+   las acciones vuelven a vivir dentro de cada `<tr>` como una celda más. */
 @media (max-width: 640px) {
+  .tabla-con-acciones {
+    display: block;
+  }
+
+  .envoltorio-datos {
+    overflow-x: visible;
+  }
+
   .tabla-movimientos thead {
     display: none;
   }
@@ -257,10 +360,10 @@ const totalesPorMoneda = computed(() => {
     margin-right: var(--espacio-3);
   }
 
-  .celda-acciones {
+  .celda-acciones-envoltorio-movil {
     justify-content: flex-end;
   }
-  .celda-acciones::before {
+  .celda-acciones-envoltorio-movil::before {
     content: none;
   }
 

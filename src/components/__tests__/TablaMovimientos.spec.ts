@@ -52,7 +52,13 @@ describe('TablaMovimientos', () => {
     const wrapper = montar()
 
     const encabezados = wrapper.findAll('thead th').map((th) => th.text())
-    expect(encabezados).toEqual(['Fecha', 'Descripción', 'Categoría', 'Banco', 'Monto', 'Acciones'])
+    expect(encabezados).toEqual(['Fecha', 'Descripción', 'Categoría', 'Banco', 'Monto'])
+  })
+
+  it('el header sr-only "Acciones" vive en la cabecera del carril lateral, no en la tabla de datos', () => {
+    const wrapper = montar()
+
+    expect(wrapper.find('.carril-acciones-cabecera').text()).toBe('Acciones')
   })
 
   it('pie de tabla: "N de N movimientos" y el total por cada moneda presente en las filas mostradas', () => {
@@ -79,35 +85,107 @@ describe('TablaMovimientos', () => {
     expect(wrapper.findAll('tbody tr')).toHaveLength(0)
   })
 
-  it('acción editar: clic en "Editar" emite editar con el id de la fila', async () => {
+  it('acción editar: clic en "⋮" abre el menú y clic en "Editar" emite editar con el id de la fila', async () => {
     const wrapper = montar()
 
-    const filaTaxi = wrapper.findAll('tbody tr').find((f) => f.text().includes('Taxi'))!
-    await filaTaxi.find('.boton-editar').trigger('click')
+    // El control se mudó al carril lateral (fuera de la tabla) en escritorio,
+    // así que se localiza por `.celda-acciones[data-fila-id]` a nivel del
+    // wrapper completo, ya no scopeado dentro de un `tbody tr`.
+    const celdaTaxi = wrapper.find('.celda-acciones[data-fila-id="m2"]')
+    await celdaTaxi.find('.boton-menu-acciones').trigger('click')
+    await celdaTaxi.find('.boton-editar').trigger('click')
 
     expect(wrapper.emitted('editar')).toEqual([['m2']])
   })
 
-  it('accesibilidad: el botón editar lleva aria-label descriptivo (afordancia por ícono, sin texto visible)', () => {
+  it('accesibilidad: el botón "⋮" lleva aria-label descriptivo y expone aria-haspopup/aria-expanded', async () => {
     const wrapper = montar()
 
-    expect(wrapper.find('.boton-editar').attributes('aria-label')).toBe('Editar movimiento')
+    const boton = wrapper.find('.boton-menu-acciones')
+    expect(boton.attributes('aria-label')).toContain('Más acciones')
+    expect(boton.attributes('aria-haspopup')).toBe('true')
+    expect(boton.attributes('aria-expanded')).toBe('false')
+
+    await boton.trigger('click')
+    expect(boton.attributes('aria-expanded')).toBe('true')
   })
 
-  it('acción eliminar: clic en "×" emite eliminar con el id de la fila', async () => {
+  it('accesibilidad: los ítems del menú llevan aria-label descriptivo (afordancia por ícono, sin texto visible)', async () => {
     const wrapper = montar()
 
-    const filaTaxi = wrapper.findAll('tbody tr').find((f) => f.text().includes('Taxi'))!
-    await filaTaxi.find('.boton-eliminar').trigger('click')
+    await wrapper.find('.boton-menu-acciones').trigger('click')
+
+    expect(wrapper.find('.boton-editar').attributes('aria-label')).toBe('Editar movimiento')
+    expect(wrapper.find('.boton-eliminar').attributes('aria-label')).toBe('Eliminar movimiento')
+  })
+
+  it('acción eliminar: clic en "⋮" abre el menú y clic en "Eliminar" emite eliminar con el id de la fila', async () => {
+    const wrapper = montar()
+
+    const celdaTaxi = wrapper.find('.celda-acciones[data-fila-id="m2"]')
+    await celdaTaxi.find('.boton-menu-acciones').trigger('click')
+    await celdaTaxi.find('.boton-eliminar').trigger('click')
 
     expect(wrapper.emitted('eliminar')).toEqual([['m2']])
+  })
+
+  it('menú de acciones: el menú no está en el DOM hasta que se hace clic en "⋮"', () => {
+    const wrapper = montar()
+
+    expect(wrapper.find('.menu-acciones-fila').exists()).toBe(false)
+  })
+
+  it('menú de acciones: abrir el menú de una fila cierra el de otra fila si ya estaba abierto', async () => {
+    const wrapper = montar()
+
+    // Localizados por `data-fila-id` a nivel wrapper: el control vive en el
+    // carril lateral (fuera del `tbody tr`) en escritorio.
+    const celdaAlmuerzo = wrapper.find('.celda-acciones[data-fila-id="m1"]')
+    const celdaTaxi = wrapper.find('.celda-acciones[data-fila-id="m2"]')
+
+    await celdaAlmuerzo.find('.boton-menu-acciones').trigger('click')
+    expect(celdaAlmuerzo.find('.menu-acciones-fila').exists()).toBe(true)
+    expect(celdaTaxi.find('.menu-acciones-fila').exists()).toBe(false)
+
+    await celdaTaxi.find('.boton-menu-acciones').trigger('click')
+    expect(celdaAlmuerzo.find('.menu-acciones-fila').exists()).toBe(false)
+    expect(celdaTaxi.find('.menu-acciones-fila').exists()).toBe(true)
+  })
+
+  it('menú de acciones: clic de nuevo en "⋮" de la misma fila cierra el menú (toggle)', async () => {
+    const wrapper = montar()
+
+    const boton = wrapper.find('.boton-menu-acciones')
+    await boton.trigger('click')
+    expect(wrapper.find('.menu-acciones-fila').exists()).toBe(true)
+
+    await boton.trigger('click')
+    expect(wrapper.find('.menu-acciones-fila').exists()).toBe(false)
+  })
+
+  it('menú de acciones: seleccionar "Editar" cierra el menú luego de emitir el evento', async () => {
+    const wrapper = montar()
+
+    await wrapper.find('.boton-menu-acciones').trigger('click')
+    await wrapper.find('.boton-editar').trigger('click')
+
+    expect(wrapper.find('.menu-acciones-fila').exists()).toBe(false)
   })
 
   it('responsive: cada celda lleva `data-etiqueta` para el colapso a tarjetas apiladas en pantallas angostas', () => {
     const wrapper = montar()
 
+    // En escritorio (default de jsdom, sin `matchMedia`) Acciones ya no es un
+    // `<td>` de la tabla de datos: vive en el carril lateral.
     const primeraFila = wrapper.findAll('tbody tr')[0]
     const etiquetas = primeraFila.findAll('td').map((td) => td.attributes('data-etiqueta'))
-    expect(etiquetas).toEqual(['Fecha', 'Descripción', 'Categoría', 'Banco', 'Monto', 'Acciones'])
+    expect(etiquetas).toEqual(['Fecha', 'Descripción', 'Categoría', 'Banco', 'Monto'])
+  })
+
+  it('invariante estructural: el control de acciones NO es descendiente del contenedor con scroll horizontal', () => {
+    const wrapper = montar()
+
+    expect(wrapper.find('.envoltorio-datos').find('.boton-menu-acciones').exists()).toBe(false)
+    expect(wrapper.find('.carril-acciones .boton-menu-acciones').exists()).toBe(true)
   })
 })

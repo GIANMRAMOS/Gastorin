@@ -869,5 +869,35 @@ describe('DashboardView (rediseño "Caudal", Fase 1: Shell + Dashboard)', () => 
 
       expect(wrapper.findComponent({ name: 'ModalAjusteSaldo' }).exists()).toBe(false)
     })
+
+    it('regresión: guardar el ajuste desde el modal vuelve a pedir cargarAjustesSaldo (antes se cerraba el modal sin recargar)', async () => {
+      // El guardado real ocurre en OTRA instancia de `useAjustesSaldo()` (la del
+      // formulario dentro de `ModalAjusteSaldo`), que empuja el ajuste a SU
+      // PROPIO `ref` local: el `ajustesSaldo` de esta vista (de donde depende
+      // `saldosPorCuenta`) solo se entera si `manejarGuardadoAjusteSaldo` vuelve
+      // a llamar a `cargarAjustesSaldo()` explícitamente.
+      prepararCargaInicial([categoriaComida], [])
+
+      const wrapper = mount(DashboardView, { global: { plugins: [crearRouterDePrueba()] } })
+      await flushPromises()
+      await wrapper.vm.$nextTick()
+
+      await wrapper
+        .findComponent({ name: 'TarjetaSaldosPorCuenta' })
+        .vm.$emit('editar-cuenta', { bancoId: 'b1', moneda: 'PEN', etiqueta: 'BCP' })
+      await wrapper.vm.$nextTick()
+
+      const llamadasAjustesAntes = fromMock.mock.calls.filter(
+        ([tabla]) => tabla === 'ajustes_saldo_cuenta',
+      ).length
+
+      await wrapper.findComponent({ name: 'ModalAjusteSaldo' }).vm.$emit('guardado')
+      await flushPromises()
+
+      const llamadasAjustesDespues = fromMock.mock.calls.filter(
+        ([tabla]) => tabla === 'ajustes_saldo_cuenta',
+      ).length
+      expect(llamadasAjustesDespues).toBeGreaterThan(llamadasAjustesAntes)
+    })
   })
 })

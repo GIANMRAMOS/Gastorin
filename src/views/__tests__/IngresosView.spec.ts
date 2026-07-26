@@ -168,6 +168,7 @@ describe('IngresosView (HU-11.3)', () => {
 
       expect(wrapper.findComponent({ name: 'ModalIngreso' }).exists()).toBe(false)
 
+      await wrapper.find('.boton-menu-acciones').trigger('click')
       await wrapper.find('.boton-editar').trigger('click')
 
       const modal = wrapper.findComponent({ name: 'ModalIngreso' })
@@ -194,6 +195,7 @@ describe('IngresosView (HU-11.3)', () => {
 
       expect(wrapper.find('[role="alertdialog"]').exists()).toBe(false)
 
+      await wrapper.find('.boton-menu-acciones').trigger('click')
       await wrapper.find('.boton-eliminar').trigger('click')
       await flushPromises()
 
@@ -209,6 +211,7 @@ describe('IngresosView (HU-11.3)', () => {
 
       expect(wrapper.text()).toContain('Sueldo julio')
 
+      await wrapper.find('.boton-menu-acciones').trigger('click')
       await wrapper.find('.boton-eliminar').trigger('click')
       await flushPromises()
 
@@ -231,6 +234,7 @@ describe('IngresosView (HU-11.3)', () => {
       const wrapper = mount(IngresosView)
       await flushPromises()
 
+      await wrapper.find('.boton-menu-acciones').trigger('click')
       await wrapper.find('.boton-eliminar').trigger('click')
       await flushPromises()
 
@@ -250,6 +254,7 @@ describe('IngresosView (HU-11.3)', () => {
       const wrapper = mount(IngresosView)
       await flushPromises()
 
+      await wrapper.find('.boton-menu-acciones').trigger('click')
       await wrapper.find('.boton-eliminar').trigger('click')
       await flushPromises()
 

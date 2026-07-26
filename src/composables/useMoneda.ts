@@ -19,10 +19,21 @@ export const NOMBRE_BANCO_NO_ESPECIFICADO = 'No especificado'
  * según la moneda del gasto. Se usa en el formulario, la confirmación y la lista.
  */
 export function useMoneda() {
-  /** Formatea un monto numérico como texto de moneda (ej. `S/ 45.50`, `$45.50`). */
-  function formatearMonto(monto: number, moneda: Moneda): string {
+  /**
+   * Formatea un monto numérico como texto de moneda (ej. `S/ 45.50`, `$45.50`).
+   * Con `opciones.sinDecimales: true` omite los centavos (ej. `S/ 2,400`),
+   * usado en mobile para ahorrar espacio horizontal en tiles angostos
+   * (`TarjetaSaldosPorCuenta`); por defecto mantiene los 2 decimales de siempre.
+   */
+  function formatearMonto(monto: number, moneda: Moneda, opciones?: { sinDecimales?: boolean }): string {
     const { locale, codigo } = CONFIGURACION_MONEDA[moneda]
-    return new Intl.NumberFormat(locale, { style: 'currency', currency: codigo }).format(monto)
+    const digitosDecimales = opciones?.sinDecimales ? 0 : undefined
+    return new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: codigo,
+      minimumFractionDigits: digitosDecimales,
+      maximumFractionDigits: digitosDecimales,
+    }).format(monto)
   }
 
   /**

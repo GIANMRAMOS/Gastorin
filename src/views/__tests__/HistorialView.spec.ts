@@ -74,6 +74,7 @@ describe('HistorialView — eliminar gasto (HU-2.3)', () => {
 
     expect(wrapper.find('[role="alertdialog"]').exists()).toBe(false)
 
+    await wrapper.find('.boton-menu-acciones').trigger('click')
     await wrapper.find('.boton-eliminar').trigger('click')
     await flushPromises()
 
@@ -90,6 +91,7 @@ describe('HistorialView — eliminar gasto (HU-2.3)', () => {
 
     expect(wrapper.text()).toContain('almuerzo')
 
+    await wrapper.find('.boton-menu-acciones').trigger('click')
     await wrapper.find('.boton-eliminar').trigger('click')
     await flushPromises()
 
@@ -126,6 +128,7 @@ describe('HistorialView — eliminar gasto (HU-2.3)', () => {
     const wrapper = mount(HistorialView)
     await flushPromises()
 
+    await wrapper.find('.boton-menu-acciones').trigger('click')
     await wrapper.find('.boton-editar').trigger('click')
 
     const modal = wrapper.findComponent({ name: 'ModalGasto' })
@@ -139,6 +142,7 @@ describe('HistorialView — eliminar gasto (HU-2.3)', () => {
     const wrapper = mount(HistorialView)
     await flushPromises()
 
+    await wrapper.find('.boton-menu-acciones').trigger('click')
     await wrapper.find('.boton-eliminar').trigger('click')
     await flushPromises()
 

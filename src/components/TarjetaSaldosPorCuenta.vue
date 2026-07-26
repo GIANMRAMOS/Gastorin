@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useMoneda } from '@/composables/useMoneda'
 import type { SaldoCuenta } from '@/composables/useDashboard'
 import type { Moneda } from '@/types/gasto'
@@ -74,6 +74,33 @@ const tiles = computed<TileCuenta[]>(() =>
     }
   }),
 )
+
+/**
+ * `true` por debajo de 900px, el breakpoint único del App Shell (sidebar vs.
+ * bottom-nav): en mobile los montos se muestran sin decimales para que quepan
+ * en los tiles angostos (3 por fila, ver `.grid-saldos-cuenta`). Reactivo vía
+ * `matchMedia`, mismo patrón de listener en mount/unmount que
+ * `TablaMovimientos.vue`. Si el entorno no soporta `matchMedia` (p. ej. jsdom
+ * en los tests), se asume escritorio (con decimales).
+ */
+const esMovil = ref(false)
+let listaMediaMovil: MediaQueryList | null = null
+
+function actualizarEsMovil(evento: MediaQueryList | MediaQueryListEvent) {
+  esMovil.value = evento.matches
+}
+
+onMounted(() => {
+  if (typeof window.matchMedia === 'function') {
+    listaMediaMovil = window.matchMedia('(max-width: 900px)')
+    actualizarEsMovil(listaMediaMovil)
+    listaMediaMovil.addEventListener('change', actualizarEsMovil)
+  }
+})
+
+onUnmounted(() => {
+  listaMediaMovil?.removeEventListener('change', actualizarEsMovil)
+})
 </script>
 
 <template>
@@ -102,10 +129,10 @@ const tiles = computed<TileCuenta[]>(() =>
         </svg>
         <p class="nombre-cuenta">{{ tile.etiqueta }}</p>
         <p class="monto-saldo-cuenta" :class="tile.monto < 0 ? 'saldo-negativo' : 'saldo-positivo'">
-          {{ formatearMonto(tile.monto, tile.moneda) }}
+          {{ formatearMonto(tile.monto, tile.moneda, { sinDecimales: esMovil }) }}
         </p>
         <p v-if="tile.secundario" class="saldo-secundario-cuenta">
-          {{ formatearMonto(tile.secundario.monto, tile.secundario.moneda) }}
+          {{ formatearMonto(tile.secundario.monto, tile.secundario.moneda, { sinDecimales: esMovil }) }}
         </p>
       </button>
     </div>

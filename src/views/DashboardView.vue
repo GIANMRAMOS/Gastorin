@@ -68,9 +68,16 @@ function cerrarAjusteSaldo() {
   cuentaEnEdicion.value = null
 }
 
-/** Tras guardar el ajuste, cierra el modal; `ajustesSaldo` ya se actualizó en el propio composable (push local). */
+/**
+ * Tras guardar el ajuste, cierra el modal y recarga `ajustesSaldo`: el guardado real ocurrió en
+ * OTRA instancia de `useAjustesSaldo()` (la del formulario dentro de `ModalAjusteSaldo`), que
+ * empujó el nuevo ajuste a SU PROPIO `ref` local — el composable no comparte estado entre
+ * instancias. Sin este `cargarAjustesSaldo()`, el `ajustesSaldo` de esta vista (y por lo tanto
+ * `saldosPorCuenta`, que depende de él) nunca se entera del ajuste nuevo.
+ */
 function manejarGuardadoAjusteSaldo() {
   cuentaEnEdicion.value = null
+  cargarAjustesSaldo()
 }
 
 /** Moneda que gobierna a la vez los KPIs, el presupuesto, el feed, el gasto por categoría y las tendencias. */

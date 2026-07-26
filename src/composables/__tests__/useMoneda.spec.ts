@@ -20,6 +20,32 @@ describe('useMoneda', () => {
     const { formatearMonto } = useMoneda()
     expect(formatearMonto(0, 'PEN')).toBe(`S/${ESPACIO_DURO}0.00`)
   })
+
+  it('regresión: llamar sin el tercer argumento mantiene 2 decimales (no cambia el comportamiento de los call-sites existentes)', () => {
+    const { formatearMonto } = useMoneda()
+    expect(formatearMonto(2400, 'PEN')).toBe(`S/${ESPACIO_DURO}2,400.00`)
+    expect(formatearMonto(2400, 'USD')).toBe('$2,400.00')
+  })
+
+  it('sinDecimales: false se comporta igual que no pasar el tercer argumento', () => {
+    const { formatearMonto } = useMoneda()
+    expect(formatearMonto(45.5, 'PEN', { sinDecimales: false })).toBe(`S/${ESPACIO_DURO}45.50`)
+  })
+
+  it('sinDecimales: true omite los centavos en PEN', () => {
+    const { formatearMonto } = useMoneda()
+    expect(formatearMonto(2400, 'PEN', { sinDecimales: true })).toBe(`S/${ESPACIO_DURO}2,400`)
+  })
+
+  it('sinDecimales: true omite los centavos en USD', () => {
+    const { formatearMonto } = useMoneda()
+    expect(formatearMonto(2400, 'USD', { sinDecimales: true })).toBe('$2,400')
+  })
+
+  it('borde: sinDecimales con monto 0 no muestra decimales', () => {
+    const { formatearMonto } = useMoneda()
+    expect(formatearMonto(0, 'PEN', { sinDecimales: true })).toBe(`S/${ESPACIO_DURO}0`)
+  })
 })
 
 describe('useMoneda — resumenMonedaPredominante', () => {

@@ -1,10 +1,21 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import TarjetaSaldosPorCuenta from '@/components/TarjetaSaldosPorCuenta.vue'
 import type { SaldoCuenta } from '@/composables/useDashboard'
 
 function montar(cuentas: SaldoCuenta[]) {
   return mount(TarjetaSaldosPorCuenta, { props: { cuentas } })
+}
+
+/** jsdom no implementa `matchMedia` nativamente; se mockea para simular el breakpoint de 900px. */
+function mockearMatchMedia(coincideConMovil: boolean) {
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches: coincideConMovil,
+    media: query,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  }))
 }
 
 describe('TarjetaSaldosPorCuenta (reemplaza el placeholder "Próximamente")', () => {
@@ -127,6 +138,40 @@ describe('TarjetaSaldosPorCuenta (reemplaza el placeholder "Próximamente")', ()
       await tiles[2].trigger('click')
 
       expect(wrapper.emitted('editar-cuenta')).toEqual([[{ bancoId: 'b3', moneda: 'USD', etiqueta: 'IBK $' }]])
+    })
+  })
+
+  describe('formato del monto según breakpoint (900px, App Shell)', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+      // @ts-expect-error -- se restaura el `matchMedia` real de jsdom (ausente) entre tests.
+      delete window.matchMedia
+    })
+
+    it('mobile (matchMedia coincide): el monto principal y el badge secundario NO muestran decimales', async () => {
+      mockearMatchMedia(true)
+      const wrapper = montar([{ bancoId: 'b1', nombreBanco: 'BCP', saldoPen: 2400, saldoUsd: -15.1 }])
+      // `esMovil` se actualiza en `onMounted` (después del primer render); hay que esperar el siguiente tick.
+      await nextTick()
+
+      expect(wrapper.find('.monto-saldo-cuenta').text()).not.toContain('.')
+      expect(wrapper.find('.saldo-secundario-cuenta').text()).not.toContain('.')
+    })
+
+    it('desktop (matchMedia no coincide): el monto principal y el badge secundario mantienen 2 decimales', async () => {
+      mockearMatchMedia(false)
+      const wrapper = montar([{ bancoId: 'b1', nombreBanco: 'BCP', saldoPen: 2400, saldoUsd: -15.1 }])
+      await nextTick()
+
+      expect(wrapper.find('.monto-saldo-cuenta').text()).toContain('.00')
+      expect(wrapper.find('.saldo-secundario-cuenta').text()).toContain('.10')
+    })
+
+    it('borde: sin soporte de matchMedia en el entorno (jsdom por defecto), se asume escritorio con decimales', async () => {
+      const wrapper = montar([{ bancoId: 'b1', nombreBanco: 'BCP', saldoPen: 2400, saldoUsd: null }])
+      await nextTick()
+
+      expect(wrapper.find('.monto-saldo-cuenta').text()).toContain('.00')
     })
   })
 })
