@@ -78,7 +78,10 @@ const tiles = computed<TileCuenta[]>(() =>
 
 <template>
   <article class="tarjeta-saldos-cuenta">
-    <p class="titulo-saldos-cuenta">Saldo por cuenta</p>
+    <div class="cabecera-saldos-cuenta">
+      <p class="titulo-saldos-cuenta">Saldo por cuenta</p>
+      <p v-if="!sinCuentas" class="pista-saldos-cuenta">Toca una cuenta para setear su saldo</p>
+    </div>
 
     <p v-if="sinCuentas" class="mensaje-sin-cuentas">
       Aún no tienes las cuentas BCP o IBK creadas en Bancos.
@@ -93,6 +96,10 @@ const tiles = computed<TileCuenta[]>(() =>
         :title="`Setear saldo de ${tile.etiqueta}`"
         @click="emit('editar-cuenta', { bancoId: tile.bancoId, moneda: tile.moneda, etiqueta: tile.etiqueta })"
       >
+        <svg class="icono-editar-cuenta" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 20h9" />
+          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+        </svg>
         <p class="nombre-cuenta">{{ tile.etiqueta }}</p>
         <p class="monto-saldo-cuenta" :class="tile.monto < 0 ? 'saldo-negativo' : 'saldo-positivo'">
           {{ formatearMonto(tile.monto, tile.moneda) }}
@@ -113,11 +120,26 @@ const tiles = computed<TileCuenta[]>(() =>
   padding: var(--espacio-4);
 }
 
+.cabecera-saldos-cuenta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--espacio-2);
+  margin-bottom: var(--espacio-3);
+}
+
 .titulo-saldos-cuenta {
-  margin: 0 0 var(--espacio-3);
+  margin: 0;
   font-size: var(--tamano-pequeno);
   font-weight: 600;
   color: var(--color-texto-secundario);
+}
+
+.pista-saldos-cuenta {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--color-texto-terciario);
+  white-space: nowrap;
 }
 
 .mensaje-sin-cuentas {
@@ -137,6 +159,7 @@ const tiles = computed<TileCuenta[]>(() =>
 }
 
 .tile-saldo-cuenta {
+  position: relative;
   background: var(--color-fondo-app);
   border: none;
   border-radius: 10px;
@@ -157,6 +180,15 @@ const tiles = computed<TileCuenta[]>(() =>
 .tile-saldo-cuenta:focus-visible {
   outline: 2px solid var(--color-borde-foco);
   outline-offset: 2px;
+}
+
+.icono-editar-cuenta {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 13px;
+  height: 13px;
+  color: var(--color-texto-terciario);
 }
 
 .nombre-cuenta {
