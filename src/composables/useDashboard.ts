@@ -301,6 +301,13 @@ export function calcularSaldoNetoPorCuenta(
  * "categoría · banco" contra los stores; un ingreso NUNCA tiene categoría
  * (la tabla `ingresos` no tiene `categoria_id`), por eso `categoriaId` es
  * `string | null` y no `string`.
+ *
+ * `creadoEn` (HU-18.1): timestamp real de registro (`gastos.creado_en` /
+ * `ingresos.created_at`, nombres distintos entre tablas). Se usa como
+ * desempate en `compararMovimientosDesc` para que, dentro de un mismo día,
+ * el feed muestre primero lo registrado más recientemente — no basta con
+ * ordenar la query por esta columna porque el feed se re-agrupa por `fecha`
+ * en memoria (ver micro-plan).
  */
 export interface MovimientoUnificado {
   tipo: 'gasto' | 'ingreso'
@@ -311,6 +318,7 @@ export interface MovimientoUnificado {
   id: string
   categoriaId: string | null
   bancoId: string
+  creadoEn: string
 }
 
 /** Mapea un `Gasto` a `MovimientoUnificado` (reutilizado por ambas funciones de combinación). */
@@ -324,6 +332,7 @@ function movimientoDesdeGasto(gasto: Gasto): MovimientoUnificado {
     id: gasto.id,
     categoriaId: gasto.categoria_id,
     bancoId: gasto.banco_id,
+    creadoEn: gasto.creado_en,
   }
 }
 
@@ -338,12 +347,20 @@ function movimientoDesdeIngreso(ingreso: Ingreso): MovimientoUnificado {
     id: ingreso.id,
     categoriaId: null,
     bancoId: ingreso.banco_id,
+    creadoEn: ingreso.created_at,
   }
 }
 
-/** Desempate determinista por `id` cuando dos movimientos comparten fecha exacta. */
+/**
+ * Orden del feed: `fecha` desc como criterio primario (del que depende el
+ * agrupado por día de `agruparPorFecha`); dentro del mismo día, `creadoEn`
+ * desc (HU-18.1: lo registrado más recientemente aparece primero); y como
+ * último desempate determinista, `id` desc, para el caso borde de
+ * `creadoEn` igual o ausente.
+ */
 function compararMovimientosDesc(a: MovimientoUnificado, b: MovimientoUnificado): number {
   if (a.fecha !== b.fecha) return b.fecha.localeCompare(a.fecha)
+  if (a.creadoEn !== b.creadoEn) return b.creadoEn.localeCompare(a.creadoEn)
   return b.id.localeCompare(a.id)
 }
 
@@ -452,7 +469,7 @@ export function useDashboard() {
         .select()
         .eq('estado', 'confirmado')
         .gte('fecha', primerDiaDeMesRelativo(MESES_VENTANA_TENDENCIA - 1))
-        .order('fecha', { ascending: false })
+        .order('creado_en', { ascending: false })
       if (error) {
         store.establecerError('No se pudieron cargar los datos del dashboard.')
         return false
@@ -463,7 +480,7 @@ export function useDashboard() {
         .from('ingresos')
         .select()
         .gte('fecha', primerDiaDeMesRelativo(MESES_VENTANA_TENDENCIA - 1))
-        .order('fecha', { ascending: false })
+        .order('created_at', { ascending: false })
       if (errorIngresos) {
         store.establecerError('No se pudieron cargar los datos del dashboard.')
         return false

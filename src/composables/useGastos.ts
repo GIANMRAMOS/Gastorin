@@ -30,7 +30,7 @@ export function useGastos() {
         .from('gastos')
         .select()
         .eq('estado', 'confirmado')
-        .order('fecha', { ascending: false })
+        .order('creado_en', { ascending: false })
       if (error) {
         store.establecerError('No se pudieron cargar los gastos.')
         return false

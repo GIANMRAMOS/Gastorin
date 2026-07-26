@@ -36,7 +36,7 @@ describe('useIngresos (HU-11.2 / HU-11.3)', () => {
   })
 
   describe('cargarIngresos (HU-11.3)', () => {
-    it('camino feliz: consulta ordenada por fecha descendente y guarda el resultado en el store', async () => {
+    it('camino feliz: consulta ordenada por fecha de registro descendente y guarda el resultado en el store', async () => {
       const builder = crearConstructorConsulta()
       fromMock.mockReturnValueOnce(builder)
       const ingresosFalsos = [ingresoBase, { ...ingresoBase, id: 'i2', fecha: '2026-07-01' }]
@@ -48,7 +48,7 @@ describe('useIngresos (HU-11.2 / HU-11.3)', () => {
 
       expect(exito).toBe(true)
       expect(fromMock).toHaveBeenCalledWith('ingresos')
-      expect(builder.order).toHaveBeenCalledWith('fecha', { ascending: false })
+      expect(builder.order).toHaveBeenCalledWith('created_at', { ascending: false })
       expect(store.ingresos).toEqual(ingresosFalsos)
       expect(store.error).toBeNull()
     })
@@ -248,6 +248,43 @@ describe('useIngresos (HU-11.2 / HU-11.3)', () => {
       expect(exito).toBe(false)
       expect(store.error).toBe('No se pudo actualizar el ingreso.')
       expect(store.ingresos[0]).toEqual(ingresoBase)
+    })
+
+    it('regresión HU-18.1: editar un ingreso en medio del listado conserva su posición (no salta al tope)', async () => {
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      const ingresoEditado: Ingreso = { ...ingresoBase, id: 'i2', importe: 500, concepto: 'editado' }
+      ;(builder.single as Mock).mockResolvedValueOnce({ data: ingresoEditado, error: null })
+
+      const store = useIngresosStore()
+      // El orden del store lo fija `created_at` desc (ver `cargarIngresos`);
+      // se simula ese orden ya establecido con 3 ingresos y se edita el del medio.
+      store.agregarIngreso({ ...ingresoBase, id: 'i3' })
+      store.agregarIngreso({ ...ingresoBase, id: 'i2' })
+      store.agregarIngreso({ ...ingresoBase, id: 'i1' })
+      expect(store.ingresos.map((i) => i.id)).toEqual(['i1', 'i2', 'i3'])
+
+      const { editarIngreso } = useIngresos()
+      const input: IngresoInput = {
+        banco_id: 'b1',
+        categoria_id: 'ci1',
+        fecha: '2026-07-10',
+        moneda: 'PEN',
+        importe: 500,
+        concepto: 'editado',
+      }
+      const exito = await editarIngreso('i2', input)
+
+      expect(exito).toBe(true)
+      // El payload de edición (`IngresoInput`) no lleva `created_at`: el
+      // criterio de orden es inmutable frente a una edición de categoría/
+      // concepto/monto/fecha.
+      const payloadEnviado = (builder.update as Mock).mock.calls[0][0]
+      expect(payloadEnviado).not.toHaveProperty('created_at')
+      // `actualizarIngreso` reemplaza por índice (`findIndex` + asignación),
+      // no hace `unshift`: la posición se conserva, no salta al tope.
+      expect(store.ingresos.map((i) => i.id)).toEqual(['i1', 'i2', 'i3'])
+      expect(store.ingresos[1]).toEqual(ingresoEditado)
     })
   })
 

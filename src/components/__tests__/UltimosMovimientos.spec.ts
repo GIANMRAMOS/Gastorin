@@ -15,6 +15,7 @@ function movimientoDe(datos: Partial<MovimientoUnificado>): MovimientoUnificado 
     // pero exigidos por el tipo `MovimientoUnificado`).
     categoriaId: 'c1',
     bancoId: 'b1',
+    creadoEn: '2026-07-10T10:00:00.000Z',
     ...datos,
   }
 }

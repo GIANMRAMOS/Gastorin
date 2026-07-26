@@ -74,8 +74,16 @@ const totalesPorMoneda = computed(() => {
             {{ formatearMonto(fila.monto, fila.moneda) }}
           </td>
           <td data-etiqueta="Acciones" class="columna-acciones celda-acciones">
-            <button type="button" class="boton-fila boton-editar" @click="emit('editar', fila.id)">
-              Editar
+            <button
+              type="button"
+              class="boton-fila boton-editar"
+              aria-label="Editar movimiento"
+              @click="emit('editar', fila.id)"
+            >
+              <svg class="icono-accion-fila" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
             </button>
             <button
               type="button"
@@ -83,7 +91,13 @@ const totalesPorMoneda = computed(() => {
               aria-label="Eliminar movimiento"
               @click="emit('eliminar', fila.id)"
             >
-              ×
+              <svg class="icono-accion-fila" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M3 6h18" />
+                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+              </svg>
             </button>
           </td>
         </tr>
@@ -158,24 +172,35 @@ const totalesPorMoneda = computed(() => {
 }
 
 .boton-fila {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   cursor: pointer;
   font-family: var(--fuente-base);
-  font-size: var(--tamano-pequeno);
-  color: var(--color-texto-secundario);
+  /* Zona clickeable de ~44px de lado (mínimo táctil recomendado) aunque el
+     ícono visual sea más chico, tanto en escritorio como en el layout
+     apilado de mobile. */
+  min-width: 44px;
+  min-height: 44px;
   padding: var(--espacio-1) var(--espacio-2);
 }
-.boton-editar {
-  font-weight: 600;
+.icono-accion-fila {
+  width: 18px;
+  height: 18px;
 }
-.boton-editar:hover {
+.boton-editar {
   color: var(--color-texto);
 }
+.boton-editar:hover {
+  opacity: 0.75;
+}
 .boton-eliminar {
-  font-size: 1.1rem;
-  line-height: 1;
   color: var(--color-error, #c0392b);
+}
+.boton-eliminar:hover {
+  opacity: 0.75;
 }
 
 .fila-totales td {

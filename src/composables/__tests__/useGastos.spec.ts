@@ -40,7 +40,7 @@ describe('useGastos', () => {
   })
 
   describe('cargarGastos', () => {
-    it('camino feliz: carga los gastos ordenados por fecha descendente', async () => {
+    it('camino feliz: carga los gastos ordenados por fecha de registro descendente', async () => {
       const builder = crearConstructorConsulta()
       fromMock.mockReturnValueOnce(builder)
       ;(builder.order as Mock).mockResolvedValueOnce({ data: [gastoBase], error: null })
@@ -54,7 +54,7 @@ describe('useGastos', () => {
       // Filtra a confirmados: los borradores de correo viven en `useBandeja`
       // y no deben aparecer en el Historial (ver `useBandeja.spec.ts`).
       expect(builder.eq).toHaveBeenCalledWith('estado', 'confirmado')
-      expect(builder.order).toHaveBeenCalledWith('fecha', { ascending: false })
+      expect(builder.order).toHaveBeenCalledWith('creado_en', { ascending: false })
       expect(store.gastos).toEqual([gastoBase])
     })
 
@@ -253,6 +253,44 @@ describe('useGastos', () => {
       expect(exito).toBe(false)
       expect(store.error).toBe('No se pudo actualizar el gasto.')
       expect(store.gastos[0]).toEqual(gastoBase)
+    })
+
+    it('regresión HU-18.1: editar un gasto en medio del listado conserva su posición (no salta al tope)', async () => {
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      const gastoEditado: Gasto = { ...gastoBase, id: 'g2', monto: 500, descripcion: 'editado' }
+      ;(builder.single as Mock).mockResolvedValueOnce({ data: gastoEditado, error: null })
+
+      const store = useGastosStore()
+      // El orden del store lo fija `creado_en` desc (ver `cargarGastos`); se
+      // simula ese orden ya establecido con 3 gastos y se edita el del medio.
+      store.agregarGasto({ ...gastoBase, id: 'g3' })
+      store.agregarGasto({ ...gastoBase, id: 'g2' })
+      store.agregarGasto({ ...gastoBase, id: 'g1' })
+      expect(store.gastos.map((g) => g.id)).toEqual(['g1', 'g2', 'g3'])
+
+      const { editarGasto } = useGastos()
+      const input: GastoInput = {
+        monto: 500,
+        moneda: 'PEN',
+        categoria_id: 'c1',
+        banco_id: 'b1',
+        fecha: '2026-07-01',
+        descripcion: 'editado',
+      }
+      const exito = await editarGasto('g2', input)
+
+      expect(exito).toBe(true)
+      // El payload de edición (`GastoInput`) no lleva `creado_en`/`actualizado_en`:
+      // el criterio de orden es inmutable frente a una edición de categoría/
+      // descripción/monto/fecha.
+      const payloadEnviado = (builder.update as Mock).mock.calls[0][0]
+      expect(payloadEnviado).not.toHaveProperty('creado_en')
+      expect(payloadEnviado).not.toHaveProperty('actualizado_en')
+      // `actualizarGasto` reemplaza por índice (`findIndex` + asignación), no
+      // hace `unshift`: la posición se conserva, no salta al tope.
+      expect(store.gastos.map((g) => g.id)).toEqual(['g1', 'g2', 'g3'])
+      expect(store.gastos[1]).toEqual(gastoEditado)
     })
   })
 

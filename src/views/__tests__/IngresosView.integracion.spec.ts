@@ -281,6 +281,36 @@ describe('IngresosView — tabla, filtros y stat cards (rediseño "Caudal", Fase
     expect(lista.props('items')).toEqual([{ categoria_id: 'ci1', nombre: 'Sueldo', total: 100 }])
   })
 
+  it('HU-18.1: dos ingresos del mismo día, distinto `created_at` — la tabla los pinta en el orden ya devuelto por la query (el registrado más reciente primero, no reordenados por fecha/id)', async () => {
+    // Mismo razonamiento que su espejo en `HistorialView.integracion.spec.ts`:
+    // `cargarIngresos` ordena por `created_at` desc en Supabase; el mock de
+    // `.order()` no reordena, así que el array pasado ya representa el orden
+    // real de la BD. Se verifica que la vista no lo altera.
+    const ingresoRegistradoTarde: Ingreso = {
+      ...ingresoSueldo,
+      id: 'i-tarde',
+      fecha: '2026-07-12',
+      concepto: 'Registrado más tarde',
+      created_at: '2026-07-12T20:00:00.000Z',
+    }
+    const ingresoRegistradoTemprano: Ingreso = {
+      ...ingresoSueldo,
+      id: 'i-temprano',
+      fecha: '2026-07-12',
+      concepto: 'Registrado más temprano',
+      created_at: '2026-07-12T08:00:00.000Z',
+    }
+    mockearCargaInicial({ ingresos: [ingresoRegistradoTarde, ingresoRegistradoTemprano] })
+
+    const wrapper = mount(IngresosView)
+    await flushPromises()
+
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(2)
+    expect(filas[0].text()).toContain('Registrado más tarde')
+    expect(filas[1].text()).toContain('Registrado más temprano')
+  })
+
   it('borde: 0 movimientos en la moneda seleccionada no produce NaN en "Mayor ingreso"', async () => {
     const wrapper = mount(IngresosView)
     await flushPromises()

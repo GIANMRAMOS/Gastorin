@@ -14,6 +14,7 @@ function movimientoDe(datos: Partial<MovimientoFeed>): MovimientoFeed {
     bancoId: 'b1',
     nombreCategoria: 'Comida',
     nombreBanco: 'BCP',
+    creadoEn: '2026-07-10T10:00:00.000Z',
     ...datos,
   }
 }

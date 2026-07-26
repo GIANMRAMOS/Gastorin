@@ -314,6 +314,40 @@ describe('HistorialView — tabla, filtros y stat cards (rediseño "Caudal", Fas
     expect(lista.props('items')).toEqual([{ categoria_id: 'ocio', nombre: 'Ocio', total: 25.5 }])
   })
 
+  it('HU-18.1: dos gastos del mismo día, distinto `creado_en` — la tabla los pinta en el orden ya devuelto por la query (el registrado más reciente primero, no reordenados por fecha/id)', async () => {
+    // `cargarGastos` ordena por `creado_en` desc en Supabase; el mock de
+    // `.order()` no reordena nada, así que el ORDEN DEL ARRAY que se le pasa
+    // representa directamente lo que ya vendría ordenado desde la BD.
+    // Ambos gastos comparten `fecha` (mismo día): si la vista reordenara por
+    // fecha (comportamiento viejo) el resultado sería indistinguible; lo que
+    // se verifica aquí es que NO se reordena por id ni alfabéticamente y se
+    // respeta tal cual el orden recibido.
+    const gastoRegistradoTarde: Gasto = {
+      ...gastoCine,
+      id: 'g-tarde',
+      fecha: '2026-07-12',
+      descripcion: 'Registrado más tarde',
+      creado_en: '2026-07-12T20:00:00.000Z',
+    }
+    const gastoRegistradoTemprano: Gasto = {
+      ...gastoCine,
+      id: 'g-temprano',
+      fecha: '2026-07-12',
+      descripcion: 'Registrado más temprano',
+      creado_en: '2026-07-12T08:00:00.000Z',
+    }
+    // Orden ya "correcto" tal como lo devolvería `.order('creado_en', {ascending:false})`.
+    mockearCargaInicial({ gastos: [gastoRegistradoTarde, gastoRegistradoTemprano] })
+
+    const wrapper = mount(HistorialView)
+    await flushPromises()
+
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas).toHaveLength(2)
+    expect(filas[0].text()).toContain('Registrado más tarde')
+    expect(filas[1].text()).toContain('Registrado más temprano')
+  })
+
   it('borde: 0 movimientos en la moneda seleccionada no produce NaN en Ticket promedio ni en Mayor gasto', async () => {
     const wrapper = mount(HistorialView)
     await flushPromises()

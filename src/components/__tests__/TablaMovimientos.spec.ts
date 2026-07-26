@@ -88,6 +88,12 @@ describe('TablaMovimientos', () => {
     expect(wrapper.emitted('editar')).toEqual([['m2']])
   })
 
+  it('accesibilidad: el botón editar lleva aria-label descriptivo (afordancia por ícono, sin texto visible)', () => {
+    const wrapper = montar()
+
+    expect(wrapper.find('.boton-editar').attributes('aria-label')).toBe('Editar movimiento')
+  })
+
   it('acción eliminar: clic en "×" emite eliminar con el id de la fila', async () => {
     const wrapper = montar()
 

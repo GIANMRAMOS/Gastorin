@@ -41,7 +41,7 @@ function ingresoDe(datos: Partial<Ingreso>): Ingreso {
     moneda: 'PEN',
     importe: 100,
     concepto: 'Sueldo',
-    created_at: '',
+    created_at: '2026-07-10T10:00:00.000Z',
     ...datos,
   }
 }
@@ -60,7 +60,7 @@ function gastoDe(datos: Partial<Gasto>): Gasto {
     estado: 'confirmado',
     gmail_message_id: null,
     gmail_fragmento: null,
-    creado_en: '',
+    creado_en: '2026-07-10T10:00:00.000Z',
     actualizado_en: '',
     ...datos,
   }
@@ -539,14 +539,15 @@ describe('useDashboard', () => {
       expect(movimientos.map((m) => m.id)).toEqual(['i1', 'g1', 'i2'])
     })
 
-    it('borde: empate de fecha entre gasto e ingreso -> ambos presentes, orden determinista por id', () => {
-      const gastos = [gastoDe({ id: 'g-empate', fecha: '2026-07-20' })]
-      const ingresos = [ingresoDe({ id: 'i-empate', fecha: '2026-07-20' })]
+    it('borde: empate de fecha Y creadoEn entre gasto e ingreso -> ambos presentes, orden determinista por id', () => {
+      const gastos = [gastoDe({ id: 'g-empate', fecha: '2026-07-20', creado_en: '2026-07-20T10:00:00.000Z' })]
+      const ingresos = [ingresoDe({ id: 'i-empate', fecha: '2026-07-20', created_at: '2026-07-20T10:00:00.000Z' })]
 
       const movimientos = combinarUltimosMovimientos(gastos, ingresos)
 
       expect(movimientos).toHaveLength(2)
-      // Desempate determinista: mayor id (localeCompare) primero.
+      // Orden: fecha desc -> creadoEn desc -> id desc. Con fecha y creadoEn iguales,
+      // el desempate final cae en el mayor id (localeCompare) primero.
       expect(movimientos.map((m) => m.id)).toEqual(['i-empate', 'g-empate'])
 
       // Reproducible: mismo input, mismo resultado.
@@ -602,9 +603,23 @@ describe('useDashboard', () => {
       expect(combinarUltimosMovimientos([], [])).toEqual([])
     })
 
-    it('mapeo de campos: tipo, descripcion, monto y moneda correctos para gasto e ingreso', () => {
-      const gasto = gastoDe({ id: 'g1', fecha: '2026-07-10', descripcion: 'Taxi', monto: 25, moneda: 'USD' })
-      const ingreso = ingresoDe({ id: 'i1', fecha: '2026-07-01', concepto: 'Sueldo', importe: 1500, moneda: 'PEN' })
+    it('mapeo de campos: tipo, descripcion, monto, moneda y creadoEn correctos para gasto e ingreso', () => {
+      const gasto = gastoDe({
+        id: 'g1',
+        fecha: '2026-07-10',
+        descripcion: 'Taxi',
+        monto: 25,
+        moneda: 'USD',
+        creado_en: '2026-07-10T09:00:00.000Z',
+      })
+      const ingreso = ingresoDe({
+        id: 'i1',
+        fecha: '2026-07-01',
+        concepto: 'Sueldo',
+        importe: 1500,
+        moneda: 'PEN',
+        created_at: '2026-07-01T09:00:00.000Z',
+      })
 
       const [movimientoGasto, movimientoIngreso] = combinarUltimosMovimientos([gasto], [ingreso])
 
@@ -617,6 +632,7 @@ describe('useDashboard', () => {
         id: 'g1',
         categoriaId: 'c1',
         bancoId: 'b1',
+        creadoEn: '2026-07-10T09:00:00.000Z',
       })
       expect(movimientoIngreso).toEqual({
         tipo: 'ingreso',
@@ -627,6 +643,7 @@ describe('useDashboard', () => {
         id: 'i1',
         categoriaId: null,
         bancoId: 'b1',
+        creadoEn: '2026-07-01T09:00:00.000Z',
       })
     })
 
@@ -723,6 +740,27 @@ describe('useDashboard', () => {
 
     it('borde: sin datos devuelve []', () => {
       expect(combinarMovimientosDelMes([], [], '2026-07-01', 'PEN', 'todos')).toEqual([])
+    })
+
+    it('HU-18.1: misma fecha (mismo día), distinto creadoEn -> ordena por creadoEn desc (lo registrado más reciente primero)', () => {
+      const gastos = [
+        gastoDe({
+          id: 'g-registrado-primero',
+          fecha: '2026-07-15',
+          moneda: 'PEN',
+          creado_en: '2026-07-15T08:00:00.000Z',
+        }),
+        gastoDe({
+          id: 'g-registrado-despues',
+          fecha: '2026-07-15',
+          moneda: 'PEN',
+          creado_en: '2026-07-15T20:00:00.000Z',
+        }),
+      ]
+
+      const movimientos = combinarMovimientosDelMes(gastos, [], '2026-07-01', 'PEN', 'todos')
+
+      expect(movimientos.map((m) => m.id)).toEqual(['g-registrado-despues', 'g-registrado-primero'])
     })
 
     it('límite: más de 5 movimientos en el mes devuelve TODOS (sin tope de 5, a diferencia de combinarUltimosMovimientos)', () => {
