@@ -4,15 +4,15 @@ import ToggleMoneda from '@/components/ToggleMoneda.vue'
 import { useGastos } from '@/composables/useGastos'
 import { useGastosStore } from '@/stores/gastos'
 import { useIngresosStore } from '@/stores/ingresos'
-import { useMoneda } from '@/composables/useMoneda'
 import type { Gasto, GastoInput, Moneda } from '@/types/gasto'
 
 /**
  * Formulario único compartido por alta y edición de gastos.
  * Si `gasto` viene definido, el formulario arranca en modo edición prellenado;
- * si no, arranca en modo alta. Para gastos con `origen === 'correo'`, `monto`
- * y `fecha` se muestran como referencia no editable (no se pueden modificar);
- * categoría, banco y descripción sí son editables.
+ * si no, arranca en modo alta. `origen === 'correo'` solo describe cómo se
+ * originó el gasto (ingesta automática desde el correo bancario); no impone
+ * ninguna restricción de edición: monto, moneda, categoría, banco, fecha y
+ * descripción son siempre editables en ambos modos.
  */
 const props = defineProps<{
   gasto?: Gasto | null
@@ -24,7 +24,6 @@ const emit = defineEmits<{
 }>()
 
 const esEdicion = computed(() => props.gasto != null)
-const esOrigenCorreo = computed(() => props.gasto?.origen === 'correo')
 
 /** Fecha de hoy en `YYYY-MM-DD` **local** (nunca `toISOString()`, que corrige a UTC y puede mostrar el día siguiente/anterior). */
 function hoyISO(): string {
@@ -49,7 +48,6 @@ const errorValidacion = ref<string | null>(null)
 const storeGastos = useGastosStore()
 const storeIngresos = useIngresosStore()
 const { crearGasto, editarGasto } = useGastos()
-const { formatearMonto } = useMoneda()
 
 /** Símbolo de moneda para el adorno visual del monto grande (el v-model sigue siendo numérico). */
 const SIMBOLO_MONEDA: Record<Moneda, string> = { PEN: 'S/', USD: '$' }
@@ -85,18 +83,7 @@ const sinCategorias = computed(() => categoriasActivas.value.length === 0)
  */
 const sinBancos = computed(() => storeIngresos.bancos.length === 0)
 
-/** Monto formateado de solo lectura para gastos de origen correo (no editable). */
-const montoReferencia = computed(() => {
-  if (!props.gasto) return ''
-  // Este formulario solo edita gastos ya `estado='confirmado'` (vienen del
-  // Historial, que filtra por ese estado): `monto`/`moneda` solo pueden ser
-  // `null` en `estado='revision_manual'` (bandeja de borradores, ver
-  // `useBandeja`), así que aquí siempre están completos.
-  if (props.gasto.monto == null || props.gasto.moneda == null) return ''
-  return formatearMonto(props.gasto.monto, props.gasto.moneda)
-})
-
-/** Valida los campos editables según el modo (alta, edición manual o edición de correo). */
+/** Valida los campos editables, iguales en alta y edición sin importar el origen del gasto. */
 function validarFormulario(): boolean {
   if (sinCategorias.value) {
     errorValidacion.value = 'No hay categorías; créalas primero.'
@@ -110,20 +97,18 @@ function validarFormulario(): boolean {
     errorValidacion.value = 'Selecciona un banco.'
     return false
   }
-  if (!esOrigenCorreo.value) {
-    const montoNumerico = Number(monto.value)
-    if (!monto.value.trim() || Number.isNaN(montoNumerico) || montoNumerico <= 0) {
-      errorValidacion.value = 'Ingresa un monto válido mayor a 0.'
-      return false
-    }
-    if (!moneda.value) {
-      errorValidacion.value = 'Selecciona una moneda.'
-      return false
-    }
-    if (!fecha.value) {
-      errorValidacion.value = 'Selecciona una fecha.'
-      return false
-    }
+  const montoNumerico = Number(monto.value)
+  if (!monto.value.trim() || Number.isNaN(montoNumerico) || montoNumerico <= 0) {
+    errorValidacion.value = 'Ingresa un monto válido mayor a 0.'
+    return false
+  }
+  if (!moneda.value) {
+    errorValidacion.value = 'Selecciona una moneda.'
+    return false
+  }
+  if (!fecha.value) {
+    errorValidacion.value = 'Selecciona una fecha.'
+    return false
   }
   errorValidacion.value = null
   return true
@@ -138,25 +123,14 @@ async function manejarEnvio() {
 
   let exito = false
   if (esEdicion.value && props.gasto) {
-    if (esOrigenCorreo.value) {
-      // Gastos de correo: monto y fecha no son editables; categoría, banco y
-      // descripción sí (el banco se deja editable para poder corregir la
-      // inferencia automática, igual que la categoría).
-      exito = await editarGasto(props.gasto.id, {
-        categoria_id: categoriaId.value,
-        banco_id: bancoId.value,
-        descripcion: descripcion.value.trim() || null,
-      })
-    } else {
-      exito = await editarGasto(props.gasto.id, {
-        monto: Number(monto.value),
-        moneda: moneda.value as Moneda,
-        categoria_id: categoriaId.value,
-        banco_id: bancoId.value,
-        fecha: fecha.value,
-        descripcion: descripcion.value.trim() || null,
-      })
-    }
+    exito = await editarGasto(props.gasto.id, {
+      monto: Number(monto.value),
+      moneda: moneda.value as Moneda,
+      categoria_id: categoriaId.value,
+      banco_id: bancoId.value,
+      fecha: fecha.value,
+      descripcion: descripcion.value.trim() || null,
+    })
   } else {
     const input: GastoInput = {
       monto: Number(monto.value),
@@ -183,17 +157,7 @@ async function manejarEnvio() {
 
     <div class="bloque-monto">
       <label for="monto">Monto</label>
-      <div v-if="esOrigenCorreo" class="monto-grande">
-        <input
-          id="monto"
-          type="text"
-          class="entrada entrada-monto sr-only"
-          :value="montoReferencia"
-          disabled
-        />
-        <span class="valor-monto-referencia">{{ montoReferencia }}</span>
-      </div>
-      <div v-else class="monto-grande">
+      <div class="monto-grande">
         <span class="simbolo-monto">{{ simboloMonto }}</span>
         <input
           id="monto"
@@ -207,8 +171,8 @@ async function manejarEnvio() {
 
       <!-- Toggle segmentado PEN/USD: capa visual. El <select> real, oculto,
            sigue siendo la fuente de verdad del v-model de moneda. -->
-      <ToggleMoneda v-model="moneda" :disabled="esOrigenCorreo" />
-      <select id="moneda" v-model="moneda" class="sr-only" :disabled="esOrigenCorreo">
+      <ToggleMoneda v-model="moneda" />
+      <select id="moneda" v-model="moneda" class="sr-only">
         <option value="" disabled>Selecciona una moneda</option>
         <option value="PEN">PEN</option>
         <option value="USD">USD</option>
@@ -242,13 +206,7 @@ async function manejarEnvio() {
 
     <div class="grupo-campo">
       <label for="fecha">Fecha</label>
-      <input
-        id="fecha"
-        v-model="fecha"
-        type="date"
-        class="entrada"
-        :disabled="esOrigenCorreo"
-      />
+      <input id="fecha" v-model="fecha" type="date" class="entrada" />
     </div>
 
     <div class="grupo-campo">
@@ -314,11 +272,4 @@ async function manejarEnvio() {
   outline: none;
   box-shadow: none;
 }
-
-.valor-monto-referencia {
-  font-size: 46px;
-  font-weight: 800;
-  color: var(--color-texto-terciario);
-}
-
 </style>

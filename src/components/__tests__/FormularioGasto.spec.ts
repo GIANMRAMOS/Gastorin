@@ -457,7 +457,7 @@ describe('FormularioGasto', () => {
       expect(wrapper.emitted('guardado')).toHaveLength(1)
     })
 
-    it('camino feliz: gasto origen correo — monto y fecha son referencia no editable; categoría/banco/descripción editables; el payload no incluye monto ni fecha', async () => {
+    it('camino feliz: gasto origen correo — monto, moneda y fecha son editables igual que uno manual; el payload los incluye actualizados', async () => {
       const store = useGastosStore()
       const otraCategoria: Categoria = { ...categoriaFalsa, id: 'c2', nombre: 'Transporte' }
       store.establecerCategorias([categoriaFalsa, otraCategoria])
@@ -466,21 +466,31 @@ describe('FormularioGasto', () => {
 
       const wrapper = montarFormulario(gastoCorreo)
 
-      // Monto de referencia formateado, campo deshabilitado
-      const inputMonto = wrapper.find('#monto')
-      expect(inputMonto.attributes('disabled')).toBeDefined()
-      expect((inputMonto.element as HTMLInputElement).value).toContain('35.90')
-      expect(wrapper.find('#fecha').attributes('disabled')).toBeDefined()
-      // Categoría, banco y descripción sí editables
+      // Monto, moneda y fecha editables, igual que en un gasto manual (sin
+      // importar el origen de ingesta): no hay restricción de edición.
+      expect(wrapper.find('#monto').attributes('disabled')).toBeUndefined()
+      expect(wrapper.find('#moneda').attributes('disabled')).toBeUndefined()
+      expect(wrapper.find('#fecha').attributes('disabled')).toBeUndefined()
       expect(wrapper.find('#categoria').attributes('disabled')).toBeUndefined()
       expect(wrapper.find('#banco').attributes('disabled')).toBeUndefined()
       expect(wrapper.find('#descripcion').attributes('disabled')).toBeUndefined()
 
       const builder = crearConstructorConsulta()
       fromMock.mockReturnValueOnce(builder)
-      const gastoActualizado: Gasto = { ...gastoCorreo, categoria_id: 'c2', banco_id: 'b2', descripcion: 'nueva desc' }
+      const gastoActualizado: Gasto = {
+        ...gastoCorreo,
+        monto: 50,
+        moneda: 'PEN',
+        fecha: '2026-07-15',
+        categoria_id: 'c2',
+        banco_id: 'b2',
+        descripcion: 'nueva desc',
+      }
       ;(builder.single as Mock).mockResolvedValueOnce({ data: gastoActualizado, error: null })
 
+      await wrapper.find('#monto').setValue('50')
+      await wrapper.find('#moneda').setValue('PEN')
+      await wrapper.find('#fecha').setValue('2026-07-15')
       await wrapper.find('#categoria').setValue('c2')
       await wrapper.find('#banco').setValue('b2')
       await wrapper.find('#descripcion').setValue('nueva desc')
@@ -488,17 +498,28 @@ describe('FormularioGasto', () => {
       await new Promise((r) => setTimeout(r, 0))
 
       expect(builder.update).toHaveBeenCalledWith({
+        monto: 50,
+        moneda: 'PEN',
         categoria_id: 'c2',
         banco_id: 'b2',
+        fecha: '2026-07-15',
         descripcion: 'nueva desc',
       })
-      expect(builder.update).not.toHaveBeenCalledWith(
-        expect.objectContaining({ monto: expect.anything() }),
-      )
-      expect(builder.update).not.toHaveBeenCalledWith(
-        expect.objectContaining({ fecha: expect.anything() }),
-      )
       expect(wrapper.emitted('guardado')).toHaveLength(1)
+    })
+
+    it('borde: en edición de un gasto origen correo, las validaciones de monto/moneda/fecha también aplican', async () => {
+      const store = useGastosStore()
+      store.establecerCategorias([categoriaFalsa])
+      useIngresosStore().establecerBancos([bancoFalso])
+
+      const wrapper = montarFormulario(gastoCorreo)
+      await wrapper.find('#monto').setValue('0')
+      await wrapper.find('form').trigger('submit.prevent')
+      await new Promise((r) => setTimeout(r, 0))
+
+      expect(fromMock).not.toHaveBeenCalled()
+      expect(wrapper.find('[role="alert"]').text()).toBe('Ingresa un monto válido mayor a 0.')
     })
 
     it('borde: en edición manual, las validaciones del alta (monto > 0, moneda y categoría) también aplican', async () => {
