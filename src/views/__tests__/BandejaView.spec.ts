@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { supabase } from '@/lib/supabaseClient'
 import { crearConstructorConsulta } from '@/lib/__mocks__/supabaseClient'
 import type { Categoria, Gasto } from '@/types/gasto'
+import type { ReglaComercio } from '@/types/reglaComercio'
 
 const fromMock = supabase.from as unknown as Mock
 
@@ -26,6 +27,7 @@ const categoriaAlimentacion: Categoria = {
 }
 
 const bancoFalso = { id: 'banco-1', usuario_id: 'u1', nombre: 'BCP', created_at: '' }
+const bancoSecundario = { id: 'banco-2', usuario_id: 'u1', nombre: 'IBK', created_at: '' }
 
 const borradorFalso: Gasto = {
   id: 'b1',
@@ -72,7 +74,7 @@ function builderEstadoIngestaCon(ultimaEjecucionEn: string) {
  */
 function mockearTablas(opciones: {
   borradores?: Gasto[]
-  reglaEncontrada?: { usuario_id: string; comercio: string; categoria_id: string; actualizado_en: string } | null
+  reglaEncontrada?: ReglaComercio | null
   errorReglas?: boolean
 }) {
   fromMock.mockImplementation((tabla: string) => {
@@ -84,7 +86,7 @@ function mockearTablas(opciones: {
     } else if (tabla === 'categorias') {
       ;(builder.order as Mock).mockResolvedValue({ data: [categoriaAlimentacion], error: null })
     } else if (tabla === 'bancos') {
-      ;(builder.order as Mock).mockResolvedValue({ data: [bancoFalso], error: null })
+      ;(builder.order as Mock).mockResolvedValue({ data: [bancoFalso, bancoSecundario], error: null })
     } else if (tabla === 'reglas_comercio') {
       ;(builder.maybeSingle as Mock).mockResolvedValue(
         opciones.errorReglas
@@ -181,22 +183,27 @@ describe('BandejaView (HU-5.2)', () => {
     await flushPromises()
 
     expect(store.borradores).toHaveLength(0)
-    expect(builderConfirmar.update).toHaveBeenCalledWith({ categoria_id: 'c1', estado: 'confirmado' })
+    expect(builderConfirmar.update).toHaveBeenCalledWith({
+      categoria_id: 'c1',
+      banco_id: 'banco-1',
+      estado: 'confirmado',
+    })
     expect(builderRegla.upsert).toHaveBeenCalledWith(
-      { usuario_id: 'u1', comercio: 'compra supermercado', categoria_id: 'c1' },
+      { usuario_id: 'u1', comercio: 'compra supermercado', categoria_id: 'c1', banco_id: 'banco-1' },
       { onConflict: 'usuario_id,comercio' },
     )
     // La bandeja queda al día: no hay más borradores por confirmar.
     expect(wrapper.text()).toContain('Bandeja al día')
   })
 
-  it('HU-14.1: comercio con regla previa muestra el banner verde con la categoría preseleccionada', async () => {
+  it('HU-14.1 / criterio 4: regla ANTERIOR a la migración 012 (banco_id null) mantiene el texto "Categoría sugerida"', async () => {
     mockearTablas({
       borradores: [borradorFalso],
       reglaEncontrada: {
         usuario_id: 'u1',
         comercio: 'compra supermercado',
         categoria_id: 'c1',
+        banco_id: null,
         actualizado_en: '',
       },
     })
@@ -209,6 +216,107 @@ describe('BandejaView (HU-5.2)', () => {
 
     expect(wrapper.find('.banner-regla-comercio').exists()).toBe(true)
     expect(wrapper.text()).toContain('Categoría sugerida por')
+  })
+
+  it('CA4-a: regla con banco_id no nulo muestra el banner "Categoría y banco sugeridos por"', async () => {
+    mockearTablas({
+      borradores: [borradorFalso],
+      reglaEncontrada: {
+        usuario_id: 'u1',
+        comercio: 'compra supermercado',
+        categoria_id: 'c1',
+        banco_id: 'banco-2',
+        actualizado_en: '',
+      },
+    })
+
+    const wrapper = mount(BandejaView)
+    await flushPromises()
+
+    await wrapper.find('.fila-borrador').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.banner-regla-comercio').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Categoría y banco sugeridos por')
+  })
+
+  it('CA3: regla previa con categoria_id y banco_id se refleja en el UPDATE del gasto y en el upsert de la regla', async () => {
+    mockearTablas({
+      borradores: [borradorFalso],
+      reglaEncontrada: {
+        usuario_id: 'u1',
+        comercio: 'compra supermercado',
+        categoria_id: 'c1',
+        banco_id: 'banco-2',
+        actualizado_en: '',
+      },
+    })
+
+    const wrapper = mount(BandejaView)
+    await flushPromises()
+
+    await wrapper.find('.fila-borrador').trigger('click')
+    await flushPromises()
+
+    const builderConfirmar = crearConstructorConsulta()
+    fromMock.mockReturnValueOnce(builderConfirmar)
+    ;(builderConfirmar.single as Mock).mockResolvedValueOnce({
+      data: { ...borradorFalso, categoria_id: 'c1', banco_id: 'banco-2', estado: 'confirmado' },
+      error: null,
+    })
+
+    const builderRegla = crearConstructorConsulta()
+    fromMock.mockReturnValueOnce(builderRegla)
+    ;(builderRegla.upsert as Mock).mockResolvedValueOnce({ data: null, error: null })
+
+    await wrapper.find('.boton-confirmar').trigger('click')
+    await flushPromises()
+
+    expect(builderConfirmar.update).toHaveBeenCalledWith({
+      categoria_id: 'c1',
+      banco_id: 'banco-2',
+      estado: 'confirmado',
+    })
+    expect(builderRegla.upsert).toHaveBeenCalledWith(
+      { usuario_id: 'u1', comercio: 'compra supermercado', categoria_id: 'c1', banco_id: 'banco-2' },
+      { onConflict: 'usuario_id,comercio' },
+    )
+  })
+
+  it('CA3-bis: sin regla previa, cambiar el banco a mano en el select se refleja en el UPDATE y crea la regla con ese banco', async () => {
+    mockearTablas({ borradores: [borradorFalso], reglaEncontrada: null })
+
+    const wrapper = mount(BandejaView)
+    await flushPromises()
+
+    await wrapper.find('.fila-borrador').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.entrada-banco-panel').setValue('banco-2')
+
+    const builderConfirmar = crearConstructorConsulta()
+    fromMock.mockReturnValueOnce(builderConfirmar)
+    ;(builderConfirmar.single as Mock).mockResolvedValueOnce({
+      data: { ...borradorFalso, banco_id: 'banco-2', estado: 'confirmado' },
+      error: null,
+    })
+
+    const builderRegla = crearConstructorConsulta()
+    fromMock.mockReturnValueOnce(builderRegla)
+    ;(builderRegla.upsert as Mock).mockResolvedValueOnce({ data: null, error: null })
+
+    await wrapper.find('.boton-confirmar').trigger('click')
+    await flushPromises()
+
+    expect(builderConfirmar.update).toHaveBeenCalledWith({
+      categoria_id: 'c1',
+      banco_id: 'banco-2',
+      estado: 'confirmado',
+    })
+    expect(builderRegla.upsert).toHaveBeenCalledWith(
+      { usuario_id: 'u1', comercio: 'compra supermercado', categoria_id: 'c1', banco_id: 'banco-2' },
+      { onConflict: 'usuario_id,comercio' },
+    )
   })
 
   it('borde: fallo del upsert de la regla NO revierte ni bloquea la confirmación ya hecha', async () => {

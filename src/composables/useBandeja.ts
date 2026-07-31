@@ -88,6 +88,8 @@ export function useBandeja() {
    * completos: si no, no llama a Supabase y devuelve un error claro (el check
    * `gastos_datos_completos_si_no_revision` de la base de datos es la
    * garantía final, pero se valida antes para dar feedback inmediato en la UI).
+   * `datosCompletar` también puede traer `banco_id` (migración 012), cuando el
+   * usuario cambia o acepta la sugerencia de banco en el panel de revisión.
    */
   async function confirmarBorrador(id: string, datosCompletar?: BorradorInput) {
     store.establecerCargando(true)

@@ -17,6 +17,7 @@ const reglaBase: ReglaComercio = {
   usuario_id: 'u1',
   comercio: 'primax surco',
   categoria_id: 'c1',
+  banco_id: null,
   actualizado_en: '2026-07-20T00:00:00Z',
 }
 
@@ -122,7 +123,53 @@ describe('useReglasComercio (HU-14.1)', () => {
       expect(exito).toBe(true)
       expect(fromMock).toHaveBeenCalledWith('reglas_comercio')
       expect(builder.upsert).toHaveBeenCalledWith(
-        { usuario_id: 'u1', comercio: 'primax surco', categoria_id: 'c1' },
+        { usuario_id: 'u1', comercio: 'primax surco', categoria_id: 'c1', banco_id: null },
+        { onConflict: 'usuario_id,comercio' },
+      )
+    })
+
+    it('con bancoId: hace upsert con el banco incluido, normalizando el comercio', async () => {
+      const builder = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builder)
+      ;(builder.upsert as Mock).mockResolvedValueOnce({ data: null, error: null })
+
+      const authStore = useAuthStore()
+      authStore.establecerUsuario({ id: 'u1', email: 'a@a.com' } as never)
+
+      const { guardarRegla } = useReglasComercio()
+      const exito = await guardarRegla('  Primax Surco  ', 'c1', 'banco-2')
+
+      expect(exito).toBe(true)
+      expect(builder.upsert).toHaveBeenCalledWith(
+        { usuario_id: 'u1', comercio: 'primax surco', categoria_id: 'c1', banco_id: 'banco-2' },
+        { onConflict: 'usuario_id,comercio' },
+      )
+    })
+
+    it('borde: bancoId vacío (\'\') o undefined siempre se guarda como null, nunca como \'\' (protege contra invalid input syntax for type uuid)', async () => {
+      const builderVacio = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builderVacio)
+      ;(builderVacio.upsert as Mock).mockResolvedValueOnce({ data: null, error: null })
+
+      const authStore = useAuthStore()
+      authStore.establecerUsuario({ id: 'u1', email: 'a@a.com' } as never)
+
+      const { guardarRegla } = useReglasComercio()
+      await guardarRegla('primax surco', 'c1', '')
+
+      expect(builderVacio.upsert).toHaveBeenCalledWith(
+        { usuario_id: 'u1', comercio: 'primax surco', categoria_id: 'c1', banco_id: null },
+        { onConflict: 'usuario_id,comercio' },
+      )
+
+      const builderUndefined = crearConstructorConsulta()
+      fromMock.mockReturnValueOnce(builderUndefined)
+      ;(builderUndefined.upsert as Mock).mockResolvedValueOnce({ data: null, error: null })
+
+      await guardarRegla('primax surco', 'c1', undefined)
+
+      expect(builderUndefined.upsert).toHaveBeenCalledWith(
+        { usuario_id: 'u1', comercio: 'primax surco', categoria_id: 'c1', banco_id: null },
         { onConflict: 'usuario_id,comercio' },
       )
     })

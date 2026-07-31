@@ -93,11 +93,15 @@ export interface GastoInput {
  * Todos los campos son opcionales porque un borrador `estado='borrador'` normal
  * ya trae `monto`/`moneda`/`categoria_id` completos desde el correo; solo un
  * borrador `estado='revision_manual'` necesita completarlos antes de confirmar.
+ * Desde la migración `012_reglas_comercio_banco.sql`, `banco_id` también puede
+ * viajar en este payload cuando el usuario cambia (o acepta la sugerencia de)
+ * el banco en el panel de revisión, para cualquier estado de borrador.
  */
 export interface BorradorInput {
   monto?: number
   moneda?: Moneda
   categoria_id?: string
+  banco_id?: string
   descripcion?: string | null
 }
 

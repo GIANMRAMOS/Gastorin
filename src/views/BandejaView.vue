@@ -122,7 +122,6 @@ const textoEstadoIngesta = computed(() => {
           :key="borradorSeleccionado.id"
           :borrador="borradorSeleccionado"
           :categorias="categoriasActivas"
-          :nombre-banco="nombreBanco(borradorSeleccionado.banco_id)"
           @cerrar="cerrarDetalle"
         />
         <div v-else class="estado-vacio-detalle">

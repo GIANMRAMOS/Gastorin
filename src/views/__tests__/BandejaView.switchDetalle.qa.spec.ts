@@ -36,6 +36,7 @@ const categoriaTransporte: Categoria = {
 }
 
 const bancoFalso = { id: 'banco-1', usuario_id: 'u1', nombre: 'BCP', created_at: '' }
+const bancoSecundario = { id: 'banco-2', usuario_id: 'u1', nombre: 'IBK', created_at: '' }
 
 const borradorA: Gasto = {
   id: 'bA',
@@ -75,7 +76,7 @@ function mockearTablas() {
         error: null,
       })
     } else if (tabla === 'bancos') {
-      ;(builder.order as Mock).mockResolvedValue({ data: [bancoFalso], error: null })
+      ;(builder.order as Mock).mockResolvedValue({ data: [bancoFalso, bancoSecundario], error: null })
     } else if (tabla === 'reglas_comercio') {
       ;(builder.maybeSingle as Mock).mockResolvedValue({ data: null, error: null })
       ;(builder.upsert as Mock).mockResolvedValue({ data: null, error: null })
@@ -163,6 +164,35 @@ describe('BandejaView — QA independiente: cambiar de borrador sin confirmar no
     // A vuelve a nacer desde `borrador.categoria_id` (fuente de la verdad
     // hasta que se confirme), no desde el chip tocado y descartado.
     expect(wrapper.find('.chip-categoria-tocable').text()).toContain('Alimentación')
+  })
+
+  it('espejo de banco: cambiar el select de banco del borrador A y saltar a B no deja el banco de A visible en el panel de B, y volver a A lo muestra de nuevo en su banco original', async () => {
+    const wrapper = mount(BandejaView)
+    await flushPromises()
+
+    const filas = wrapper.findAll('.fila-borrador')
+    expect(filas).toHaveLength(2)
+
+    // Abre el borrador A (banco inicial "banco-1") y lo cambia a "banco-2" sin confirmar.
+    await filas[0].trigger('click')
+    await flushPromises()
+    expect((wrapper.find('.entrada-banco-panel').element as HTMLSelectElement).value).toBe('banco-1')
+
+    await wrapper.find('.entrada-banco-panel').setValue('banco-2')
+    expect((wrapper.find('.entrada-banco-panel').element as HTMLSelectElement).value).toBe('banco-2')
+
+    // Salta al borrador B sin confirmar el cambio de A.
+    const filasActualizadas = wrapper.findAll('.fila-borrador')
+    await filasActualizadas[1].trigger('click')
+    await flushPromises()
+
+    // El panel de B debe mostrar SU banco original ("banco-1"), no el "banco-2" filtrado desde A.
+    expect((wrapper.find('.entrada-banco-panel').element as HTMLSelectElement).value).toBe('banco-1')
+
+    // Vuelve a A: el cambio no persistido se perdió, sin rastro.
+    await wrapper.findAll('.fila-borrador')[0].trigger('click')
+    await flushPromises()
+    expect((wrapper.find('.entrada-banco-panel').element as HTMLSelectElement).value).toBe('banco-1')
   })
 })
 

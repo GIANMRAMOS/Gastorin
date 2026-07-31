@@ -5,8 +5,9 @@ import type { ReglaComercio } from '@/types/reglaComercio'
 
 /**
  * Composable que encapsula las llamadas a Supabase para el dominio de
- * "reglas de comercio" (Épica 14, HU-14.1): recuerda con qué categoría se
- * confirmó por última vez un comercio, para sugerirla la próxima vez.
+ * "reglas de comercio" (Épica 14, HU-14.1, extendido en la migración 012 con
+ * banco): recuerda con qué categoría y banco se confirmó por última vez un
+ * comercio, para sugerirlos la próxima vez.
  * Sub-dominio del mismo `useGastosStore`, mismo precedente que
  * `useBandeja`/`useCategorias`. No tiene lista propia en el store: la
  * sugerencia es transitoria por selección y vive en estado local del panel
@@ -90,12 +91,19 @@ export function useReglasComercio() {
   }
 
   /**
-   * Guarda (crea o actualiza) la regla de categoría para un comercio: la
-   * próxima vez que aparezca el mismo comercio, se sugiere esta categoría.
+   * Guarda (crea o actualiza) la regla de categoría y banco para un comercio:
+   * la próxima vez que aparezca el mismo comercio, se sugieren estos valores.
    * `onConflict` sobre la PK compuesta `(usuario_id, comercio)` de la
-   * migración 010.
+   * migración 010. El upsert siempre refleja la última confirmación: si se
+   * confirmara sin banco elegido, la regla quedaría con `banco_id = null` (en
+   * la práctica no ocurre, un borrador siempre trae `banco_id` no nulo, ver
+   * `types/gasto.ts`).
    */
-  async function guardarRegla(comercio: string, categoriaId: string): Promise<boolean> {
+  async function guardarRegla(
+    comercio: string,
+    categoriaId: string,
+    bancoId?: string | null,
+  ): Promise<boolean> {
     store.establecerCargando(true)
     try {
       const usuarioId = authStore.usuario?.id
@@ -106,7 +114,14 @@ export function useReglasComercio() {
       const { error } = await supabase
         .from('reglas_comercio')
         .upsert(
-          { usuario_id: usuarioId, comercio: normalizarComercio(comercio), categoria_id: categoriaId },
+          {
+            usuario_id: usuarioId,
+            comercio: normalizarComercio(comercio),
+            categoria_id: categoriaId,
+            // `|| null` (no `?? null`), deliberado: convierte también `''` a
+            // `null` para no mandarle a Postgres un uuid vacío (22P02).
+            banco_id: bancoId || null,
+          },
           { onConflict: 'usuario_id,comercio' },
         )
       return !error

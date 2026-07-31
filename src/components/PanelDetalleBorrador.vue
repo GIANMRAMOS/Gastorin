@@ -5,6 +5,7 @@ import { useBandeja } from '@/composables/useBandeja'
 import { useReglasComercio } from '@/composables/useReglasComercio'
 import { useColorCategoria } from '@/composables/useColorCategoria'
 import { useMoneda } from '@/composables/useMoneda'
+import { useIngresosStore } from '@/stores/ingresos'
 import type { BorradorInput, Categoria, Gasto, Moneda } from '@/types/gasto'
 import type { ReglaComercio } from '@/types/reglaComercio'
 
@@ -12,9 +13,13 @@ import type { ReglaComercio } from '@/types/reglaComercio'
  * Panel de detalle del borrador seleccionado (rediseño "Caudal", Fase 3):
  * absorbe la edición que antes vivía en `TarjetaBorrador.vue` (monto/moneda
  * editables en revisión manual, selector de categoría, confirmar/descartar),
- * más el banner de sugerencia de categoría de HU-14.1. Sigue el mismo patrón
- * "el componente es responsable de su propia IO, el store refleja el
- * resultado solo" (llama directamente a `useBandeja`/`useReglasComercio`).
+ * más el banner de sugerencia de categoría/banco de HU-14.1 (extendida en la
+ * migración 012). Sigue el mismo patrón "el componente es responsable de su
+ * propia IO, el store refleja el resultado solo" (llama directamente a
+ * `useBandeja`/`useReglasComercio`). Banco pasó de texto de solo lectura a
+ * `<select>` editable, preseleccionado por la regla de comercio si ésta trae
+ * `banco_id` (mismo patrón que `FormularioGasto.vue`, leyendo el catálogo
+ * directo de `useIngresosStore`).
  *
  * El padre (`BandejaView`) monta este componente con `:key="borrador.id"`
  * para que se recree por completo al cambiar de selección: todo el estado
@@ -24,8 +29,6 @@ const props = defineProps<{
   borrador: Gasto
   /** Categorías activas del usuario, para el selector de chips. */
   categorias: Categoria[]
-  /** Nombre del banco ya resuelto (el borrador solo trae `banco_id`). */
-  nombreBanco: string
 }>()
 
 const emit = defineEmits<{
@@ -37,6 +40,7 @@ const { confirmarBorrador, descartarBorrador } = useBandeja()
 const { buscarReglaPorComercio, contarCargosComercio, guardarRegla } = useReglasComercio()
 const { colorCategoria } = useColorCategoria()
 const { formatearMonto } = useMoneda()
+const storeIngresos = useIngresosStore()
 
 const esRevisionManual = computed(() => props.borrador.estado === 'revision_manual')
 
@@ -50,6 +54,15 @@ const monedaEditada = ref<Moneda | ''>(props.borrador.moneda ?? '')
  * persiste recién al confirmar (un solo UPDATE), no en cada toque de chip.
  */
 const categoriaSeleccionadaId = ref(props.borrador.categoria_id)
+
+/**
+ * Banco elegido para este borrador: nace con el que resolvió la Edge Function
+ * `importar-borrador` y lo pisa la regla de comercio si ésta trae `banco_id`
+ * (migración 012: la regla pesa más que la heurística de la ingesta).
+ * Independiente de `categoriaSeleccionadaId`: tocar uno no afecta al otro,
+ * aunque al confirmar compartan la misma fila de `reglas_comercio`.
+ */
+const bancoSeleccionadoId = ref(props.borrador.banco_id)
 
 /** El chip de categoría, tocado, expande/colapsa la fila de alternativas (1 toque abre). */
 const chipsExpandidos = ref(false)
@@ -74,6 +87,11 @@ onMounted(async () => {
   if (regla.categoria_id !== categoriaSeleccionadaId.value) {
     categoriaSeleccionadaId.value = regla.categoria_id
   }
+  // Solo pisa el banco si la regla trae uno: una regla anterior a la migración
+  // 012 (`banco_id` null) debe dejar intacto el banco resuelto por la ingesta.
+  if (regla.banco_id) {
+    bancoSeleccionadoId.value = regla.banco_id
+  }
   cantidadCargosPrevios.value = await contarCargosComercio(props.borrador.descripcion)
 })
 
@@ -86,8 +104,12 @@ const categoriaActual = computed(
 const textoBannerRegla = computed(() => {
   const cantidad = cantidadCargosPrevios.value
   const etiquetaCantidad = cantidad === 1 ? 'cargo anterior' : 'cargos anteriores'
-  return `Categoría sugerida por ${cantidad} ${etiquetaCantidad} de ${props.borrador.descripcion}. Al confirmar se guarda la regla.`
+  const prefijo = reglaEncontrada.value?.banco_id ? 'Categoría y banco sugeridos' : 'Categoría sugerida'
+  return `${prefijo} por ${cantidad} ${etiquetaCantidad} de ${props.borrador.descripcion}. Al confirmar se guarda la regla.`
 })
+
+/** Catálogo de bancos todavía sin cargar: el select se muestra inerte, pero el banco del borrador sigue vigente. */
+const sinBancos = computed(() => storeIngresos.bancos.length === 0)
 
 /** Falta completar monto y/o moneda: campos dudosos a resaltar en revisión manual. */
 const faltaMonto = computed(() => esRevisionManual.value && props.borrador.monto == null)
@@ -149,6 +171,11 @@ async function confirmar() {
       datosCompletar.monto = Number(montoEditado.value)
       datosCompletar.moneda = monedaEditada.value as Moneda
     }
+    // Guarda contra `''`: si el catálogo no cargó, se prefiere no mandar el campo
+    // (el borrador conserva su `banco_id`) antes que romper el UPDATE con un uuid inválido.
+    if (bancoSeleccionadoId.value) {
+      datosCompletar.banco_id = bancoSeleccionadoId.value
+    }
 
     const exito = await confirmarBorrador(props.borrador.id, datosCompletar)
     if (!exito) {
@@ -158,7 +185,7 @@ async function confirmar() {
 
     if (props.borrador.descripcion && categoriaSeleccionadaId.value) {
       try {
-        await guardarRegla(props.borrador.descripcion, categoriaSeleccionadaId.value)
+        await guardarRegla(props.borrador.descripcion, categoriaSeleccionadaId.value, bancoSeleccionadoId.value || null)
       } catch {
         // Comodidad, no crítica: un fallo aquí no debe afectar la confirmación ya hecha.
       }
@@ -265,8 +292,20 @@ async function descartar() {
         </div>
       </div>
       <div class="dato-panel">
-        <p class="etiqueta-dato-panel">Banco</p>
-        <p class="valor-dato-panel">{{ nombreBanco }}</p>
+        <label class="etiqueta-dato-panel" :for="`banco-${borrador.id}`">Banco</label>
+        <select
+          :id="`banco-${borrador.id}`"
+          v-model="bancoSeleccionadoId"
+          class="entrada entrada-banco-panel"
+          :disabled="sinBancos"
+        >
+          <!-- Fallback mientras el catálogo no llegó: evita que el select se vea
+               vacío/roto sin perder el banco que ya trae el borrador. -->
+          <option v-if="sinBancos" :value="bancoSeleccionadoId" disabled>Cargando bancos…</option>
+          <option v-for="banco in storeIngresos.bancos" :key="banco.id" :value="banco.id">
+            {{ banco.nombre }}
+          </option>
+        </select>
       </div>
     </div>
 
@@ -405,6 +444,11 @@ async function descartar() {
   margin: 0;
   color: var(--color-texto);
   font-weight: 600;
+}
+
+.entrada-banco-panel {
+  width: 100%;
+  min-width: 0;
 }
 
 .valor-monto-panel {
